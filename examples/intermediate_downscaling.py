@@ -163,6 +163,11 @@ def init_par_groups(data_par_size, tensor_par_size, seq_par_size, fsdp_size, sim
 
     assert seq_par_size ==1, "Sequence parallelism not implemented"
 
+    print(f"data_par_size: {data_par_size}")
+    print(f"seq_par_size: {seq_par_size}")  
+    print(f"tensor_par_size: {tensor_par_size}")
+    print(f"world_size: {world_size}")
+    print(f"Product: {data_par_size * seq_par_size * tensor_par_size}")
     assert (data_par_size * seq_par_size * tensor_par_size)==world_size, "DATA_PAR_SIZE * SEQ_PAR_SIZE * TENSOR_PAR_SIZE must equal to world_size"
     assert (num_heads % tensor_par_size) ==0, "model heads % tensor parallel size must be 0"
 

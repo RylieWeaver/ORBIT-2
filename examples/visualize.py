@@ -324,7 +324,8 @@ if preset!="vit" and preset!="res_slimvit":
 
 
 # Set up data
-data_key = "ERA5_2"
+# data_key = "ERA5_2"
+data_key = "INFER"
 
 in_vars = dict_in_variables[data_key]
 out_vars = dict_out_variables[data_key]
@@ -395,7 +396,7 @@ denorm = test_transforms[0]
 
 print("denorm is ",denorm,flush=True)
 
-pretrain_path = "/lustre/orion/lrn036/world-shared/xf9/downscale_checkpoint/intermediate_117m.ckpt"
+# pretrain_path = "/lustre/orion/lrn036/world-shared/xf9/downscale_checkpoint/intermediate_117m.ckpt"
 
 # load from pretrained model weights
 load_checkpoint_pretrain(model, pretrain_path,tensor_par_size=tensor_par_size,tensor_par_group=tensor_par_group)

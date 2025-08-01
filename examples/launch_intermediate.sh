@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -A LRN036
+#SBATCH -A lrn036
 #SBATCH -J flash
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:8

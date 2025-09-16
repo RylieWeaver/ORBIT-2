@@ -1,7 +1,12 @@
 # ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling
 
 <p align="left">
-  <img src="docs/imgs/orbit2.png" width="640px">
+  <img src="docs/figs/example_downscale.png" width="640px">
+</p>
+
+
+<p align="left">
+  <img src="docs/figs/example_downscale2.png" width="640px">
 </p>
 
 This repository contains code accompanying the paper [**ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling**](https://arxiv.org/pdf/2505.04802).
@@ -11,6 +16,15 @@ ORBIT-2 is a scalable foundation model for global, hyper-resolution climate down
  (1) Residual Slim ViT (Reslim), a lightweight architecture with residual learning and Bayesian regularization for efficient, robust prediction; and 
  (2) TILES, a tile-wise sequence scaling algorithm that reduces self-attention complexity from quadratic to linear, enabling long-sequence processing and massive parallelism. 
  ORBIT-2 scales to 10 billion parameters across 65,536 GPUs, achieving up to 4.1 ExaFLOPS sustained throughput and 74–98% strong scaling efficiency. It supports downscaling to 0.9 km global resolution and processes sequences up to 4.2 billion tokens. On 7 km resolution benchmarks, ORBIT-2 achieves high accuracy with 𝑅2 scores in range of 0.98–0.99 against observation data.
+
+## What is Reslim
+Reslim is a vision transformer (ViT) architecture that operates and trains directly on adaptively compressed spatial inputs, significantly reducing sequence length while preserving critical information. It preserves accuracy and reduces uncertainty through a lightweight residual learning architecture, enabling efficient, low-overhead predictions.
+
+
+<p align="left">
+  <img src="docs/figs/reslim.png" width="640px">
+</p>
+
 
 ## Pretraining
 

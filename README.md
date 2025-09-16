@@ -1,7 +1,7 @@
 # ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling
 
 <p align="left">
-  <img src="docs/figs/example_downscale.png" width="640px">
+  <img src="docs/figs/example_downscale.png" width="540px">
 </p>
 
 
@@ -31,7 +31,7 @@ Reslim is a vision transformer (ViT) architecture that operates and trains direc
 TILES is a ViT training algorithm that reduces ViT’s self-attention complexity from quadratic to linear. It works by dividing images into overlapping tiles, each processed in parallel on separate Graphical Process Units (GPUs) using localized self-attention. Each tile’s downscaled outputs are then seamlessly merged to the full image.
 
 <p align="left">
-  <img src="docs/figs/TILES.png" width="640px">
+  <img src="docs/figs/TILES.png" width="400px">
 </p>
 
 

@@ -62,7 +62,7 @@ Isaac, fill in here for the DGX box example. **
 ### Pretraining and Fine-Tuning Datasets on Frontier
 
 <p align="left">
-  <img src="docs/imgs/pretraing-data-table.png" width="640px">
+  <img src="docs/figs/pretraing-data-table.png" width="640px">
 </p>
 
 
@@ -70,7 +70,7 @@ Isaac, fill in here for the DGX box example. **
 
 The expected scaling performance is
 <p align="left">
-  <img src="docs/imgs/strong_scaling.png" width="640px">
+  <img src="docs/figs/strong_scaling.png" width="640px">
 </p>
 
 ### Maximum Sequence Length Scaling
@@ -80,7 +80,7 @@ The expected scaling performance is
 
 ### Climate Analysis
 <p align="left">
-  <img src="docs/imgs/climate_analysis.png" width="640px">
+  <img src="docs/figs/climate_analysis.png" width="640px">
 </p>
 
 

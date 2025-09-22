@@ -70,10 +70,19 @@ Isaac, fill in here for the DGX box example. **
 
 The expected scaling performance is
 <p align="left">
-  <img src="docs/imgs/pretraing-performance.png" width="640px">
+  <img src="docs/imgs/strong_scaling.png" width="640px">
 </p>
 
 ### Maximum Sequence Length Scaling
 
 
 ### Model Inference Speed
+
+### Climate Analysis
+<p align="left">
+  <img src="docs/imgs/climate_analysis.png" width="640px">
+</p>
+
+
+
+### Animation

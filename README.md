@@ -38,51 +38,45 @@ TILES is a ViT training algorithm that reduces ViT’s self-attention complexity
 </p>
 
 
-## Pretraining
+## Installation Guide
+## Isaac, please fill in here. Provide clear installation instructions. Specify all dependencies (requirements.txt or equivalent).
 
-### Pretraining on Frontier
-To run the pretraining do `sbatch pretrain.lcf`. We provide in the `./config` directories the setup to run 9.5 million, 126 million, 1 billion and 10 billion parameter models. Available training losses include MSE, MAE, latitude weighted MSE, Pearson Score, Anomaly Coefficient. Most recently, hybrid perceptual loss, and bayesian estimation loss with total variation prior. Training losses can be changed in the yaml files.
+(1) Install your conda environment
+(2) Then do pip install -e . to install the package to the environment
+(3) Do  pip install -r requirements.txt
 
-The expected performance is
-<p align="left">
-  <img src="docs/imgs/pretraing-performance.png" width="640px">
-</p>
 
-### Pretraining Datasets on Frontier
+
+## Tutorial Example
+## Hong-Jun, fill in here for frontier supercomputer example.
+## Isaac, fill in here for the DGX box example.
+
+
+## Hyperparameter Configuration
+## Isaac, fill in here.Explain how to use configuration files for experiments.
+
+## Pretrained and Fine-Tuned Model Checkpoints
+## Jong-Youl, can you upload the checkpoints and include the path here.
+
+
+### Pretraining and Fine-Tuning Datasets on Frontier
 The pretraining datasets can be found on Frontier 
 ```
-ERA5 5.6 degree "/lustre/orion/lrn036/world-shared/data/superres/era5/5.625_deg/"   
-ERA5 1.4 degree "/lustre/orion/lrn036/world-shared/data/superres/era5/1.40625_deg/"  
-ERA5 1.0 degree "/lustre/orion/lrn036/world-shared/data/superres/era5/1.0_deg/"  
-ERA5 0.25 degree "/lustre/orion/lrn036/world-shared/data/superres/era5/0.25_deg/"   
-PRISM 16 km "/lustre/orion/lrn036/world-shared/data/superres/prism/10.0_arcmin"  
-PRISM 4 km "/lustre/orion/lrn036/world-shared/data/superres/prism/2.5_arcmin"  
-DAYMET 16 km "/lustre/orion/lrn036/world-shared/data/superres/daymet/10.0_arcmin"  
-DAYMET 4 km "/lustre/orion/lrn036/world-shared/data/superres/daymet/2.5_arcmin"  
-DAYMET 3.5 km "/lustre/orion/lrn036/world-shared/data/superres/daymet/2.0_arcmin"  
-DAYMET 800 m "/lustre/orion/lrn036/world-shared/data/superres/daymet/0.5_arcmin"
 ```
 
 <p align="left">
   <img src="docs/imgs/pretraing-data-table.png" width="640px">
 </p>
 
-## Finetuning
 
-### Finetuning on Frontier
-To run the pretraining do `sbatch finetuning.lcf`. The expected performance is
+### Strong Scaling on Frontier
+
+The expected scaling performance is
 <p align="left">
-  <img src="docs/imgs/finetuning-performance.png" width="640px">
+  <img src="docs/imgs/pretraing-performance.png" width="640px">
 </p>
 
-### Finetuning Checkpoints
-```
-9.5M Model: /lustre/orion/lrn036/world-shared/xf9/downscale_checkpoint/intermediate_8m.ckpt
-126M Model: /lustre/orion/lrn036/world-shared/xf9/downscale_checkpoint/intermediate_117m.ckpt
-1B Model: /lustre/orion/lrn036/world-shared/xf9/downscale_checkpoint/intermediate_1b.ckpt_rank_*
-```
+### Maximum Sequence Length Scaling
 
-### Finetuning Datasets
-<p align="left">
-  <img src="docs/imgs/finetuning-data-table.png" width="640px">
-</p>
+
+### Model Inference Speed

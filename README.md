@@ -1,13 +1,6 @@
 # ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling
-
-<p align="center">
-  <img src="docs/figs/example_downscale.png" width="540px">
-</p>
-
-
-<p align="center">
-  <img src="docs/figs/example_downscale2.png" width="640px">
-</p>
+<p align="center"> <img src="docs/figs/example_downscale.png" width="540px"> </p> 
+<p align="center"> <img src="docs/figs/example_downscale2.png" width="640px"> </p>
 
 This repository contains code accompanying the paper [**ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling**](https://arxiv.org/pdf/2505.04802).
 

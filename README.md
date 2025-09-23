@@ -32,7 +32,7 @@ TILES is a ViT training algorithm that reduces ViT’s self-attention complexity
 
 
 ## Installation
-**To Do: Isaac, please fill in here. Provide clear installation instructions. Specify all dependencies (requirements.txt or equivalent).**
+**To Do: Isaac, please fill in here. Provide clear installation instructions. Specify all dependencies (requirements.txt or equivalent).
 
 (1) Install your conda environment
 (2) Then do pip install -e . to install the package to the environment
@@ -41,21 +41,21 @@ TILES is a ViT training algorithm that reduces ViT’s self-attention complexity
 
 
 ## Tutorial Example
-**To Do: Hong-Jun, fill in here for frontier supercomputer example.**
-**Isaac, fill in here for the DGX box example. **
+**To Do: Hong-Jun, fill in here for frontier supercomputer example.
+**Isaac, fill in here for the DGX box example. 
 
 
 ## Hyperparameter Configuration
-**To Do: Isaac, fill in here.Explain how to use configuration files for experiments.**
+**To Do: Isaac, fill in here.Explain how to use configuration files for experiments.
 
 ## Pretrained and Fine-Tuned Model Checkpoints
 **To Do: Jong-Youl, can you upload the checkpoints and include the path here.**
 
 
-### Pretraining and Fine-Tuning Datasets on Frontier
+## Pretraining and Fine-Tuning Datasets on Frontier
 See Table 1 of the orbit-2 paper at [ORBIT-2 Paper on arXiv](https://arxiv.org/pdf/2505.04802) , for datasets trained for checkpoints
 
-### Performance
+## Performance
 ### Strong Scaling on Frontier
 
 <p align="center">

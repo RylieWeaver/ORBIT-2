@@ -52,8 +52,8 @@ Key features:
 
 #### Prerequisites
 - Access to Frontier supercomputer at ORNL
-- Allocated compute hours (project: lrn036)
-- Conda environment setup at: `/lustre/orion/lrn036/world-shared/xf9/torch27`
+- Allocated compute hours (replace 'lrn036' with your project allocation)
+- Conda environment setup (see Installation section above)
 
 #### Step 1: Configure Your Experiment
 Choose an appropriate configuration file from `configs/`:
@@ -145,6 +145,11 @@ tiling:
 ```
 
 #### Step 2: Submit Training Job
+First, edit `launch_intermediate.sh` to update:
+- `#SBATCH -A lrn036` → your project allocation
+- `conda activate` path → your conda environment
+
+Then submit the job:
 ```bash
 cd examples/
 sbatch launch_intermediate.sh

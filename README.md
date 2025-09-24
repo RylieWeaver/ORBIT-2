@@ -148,6 +148,7 @@ tiling:
 First, edit `launch_intermediate.sh` to update:
 - `#SBATCH -A lrn036` → your project allocation
 - `conda activate` path → your conda environment
+- `../configs/interm_8m.yaml` → your chosen config file (e.g., `interm_117m.yaml`, `interm_1b.yaml`)
 
 Then submit the job:
 ```bash

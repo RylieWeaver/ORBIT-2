@@ -41,8 +41,99 @@ TILES is a ViT training algorithm that reduces ViT’s self-attention complexity
 
 
 ## Tutorial Example
-**To Do: Hong-Jun, fill in here for frontier supercomputer example.
-**Isaac, fill in here for the DGX box example. 
+
+### Running on Frontier Supercomputer
+
+#### Prerequisites
+- Access to Frontier supercomputer at ORNL
+- Allocated compute hours (project: lrn036)
+- Conda environment setup at: `/lustre/orion/lrn036/world-shared/xf9/torch27`
+
+#### Step 1: Configure Your Experiment
+Choose an appropriate configuration file from `configs/`:
+- `interm_8m.yaml`: 8M parameter model for testing
+- `interm_117m.yaml`: 117M parameter model
+- `interm_1b.yaml`: 1B parameter model
+- `interm_10b.yaml`: 10B parameter model (requires more nodes)
+
+Key parameters to modify:
+```yaml
+trainer:
+  max_epochs: 100      # Training epochs
+  batch_size: 32       # Batch size per GPU
+  data_type: bfloat16  # Use bfloat16 for memory efficiency
+
+parallelism:
+  fsdp: 4              # Fully Sharded Data Parallel
+  tensor_par: 1        # Tensor parallelism
+  seq_par: 1           # Sequence parallelism
+
+tiling:
+  do_tiling: False     # Enable for very large sequences
+  div: 4               # Tile division factor
+  overlap: 3           # Tile overlap
+```
+
+#### Step 2: Submit Training Job
+```bash
+cd examples/
+sbatch launch_intermediate.sh
+```
+
+The script will:
+- Load required modules (ROCm 6.3.1, libfabric, aws-ofi-rccl)
+- Set up environment variables for optimal AMD GPU performance
+- Launch training with 8 GPUs per node
+- Output logs to `flash-{JOBID}.out`
+
+#### Step 3: Monitor Training
+```bash
+# Check job status
+squeue -u $USER
+
+# Monitor training progress
+tail -f flash-{JOBID}.out
+```
+
+#### Step 4: Visualize Results
+After training completes or reaches a checkpoint:
+```bash
+sbatch launch_visualize.sh
+```
+
+This will generate visualization outputs for:
+- Input ERA5 data at low resolution
+- ORBIT-2 downscaled predictions at high resolution
+- Comparison metrics
+
+#### Example Output
+Training on 1 node (8 GPUs) with the 8M model typically:
+- Processes ~400 samples per epoch
+- Achieves ~X samples/second throughput
+- Reaches R² > 0.98 after ~50 epochs
+
+#### Scaling to Multiple Nodes
+For larger models or datasets, modify the SLURM parameters:
+```bash
+#SBATCH --nodes=8          # Use 8 nodes (64 GPUs)
+#SBATCH -t 02:00:00        # Extend time limit
+```
+
+And enable advanced parallelism in config:
+```yaml
+parallelism:
+  fsdp: 8
+  tensor_par: 2
+  seq_par: 2
+```
+
+#### Troubleshooting
+- If encountering OOM errors, reduce `batch_size` or enable gradient checkpointing
+- For network issues, check the NCCL environment variables
+- Ensure DDStore is properly configured for checkpointing
+
+### Running on DGX Systems
+**To Do: Isaac, fill in here for the DGX box example. 
 
 
 ## Hyperparameter Configuration

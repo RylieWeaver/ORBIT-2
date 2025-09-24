@@ -24,7 +24,13 @@ Reslim is a vision transformer (ViT) architecture that operates and trains direc
 
 
 ## TILES Sequence Scaling Algorithm
-TILES is a ViT training algorithm that reduces ViT’s self-attention complexity from quadratic to linear. It works by dividing images into overlapping tiles, each processed in parallel on separate Graphical Process Units (GPUs) using localized self-attention. Each tile’s downscaled outputs are then seamlessly merged to the full image.
+TILES is a ViT training algorithm that reduces ViT’s self-attention complexity from quadratic to linear. It works by dividing images into overlapping tiles, each processed in parallel on separate GPUs using localized self-attention. Each tile’s downscaled outputs are then seamlessly merged to the full image.
+
+Key features:
+- **Tile Division**: Images are split into div×div tiles (e.g., div=4 creates 16 tiles)
+- **Overlapping Regions**: Adjacent tiles share overlap pixel rows/columns to ensure continuity
+- **Patch Size Compatibility**: Tile dimensions must be divisible by the transformer's patch_size
+- **Linear Complexity**: Enables processing of sequences up to 4.2 billion tokens
 
 <p align="center">
   <img src="docs/figs/TILES.png" width="400px">
@@ -127,10 +133,15 @@ parallelism:
   tensor_par: 1        # Tensor parallelism
   seq_par: 1           # Sequence parallelism
 
+# TILES: Tile-wise sequence scaling algorithm
 tiling:
-  do_tiling: False     # Enable for very large sequences
-  div: 4               # Tile division factor
-  overlap: 3           # Tile overlap
+  do_tiling: False     # Enable TILES for processing very large images/sequences
+  div: 4               # Division factor: splits image into div×div tiles
+                       # div=2 → 4 tiles (2×2), div=4 → 16 tiles (4×4)
+  overlap: 3           # Number of pixel rows/columns to overlap between adjacent tiles
+                       # Important: Total tile size must be divisible by patch_size
+                       # If not, you'll get an error asking to adjust overlap
+                       # Error message will tell you how many pixels to add
 ```
 
 #### Step 2: Submit Training Job

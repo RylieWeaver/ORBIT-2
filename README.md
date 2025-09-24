@@ -172,15 +172,28 @@ tail -f flash-{JOBID}.out
 ```
 
 #### Step 4: Visualize Results
-After training completes or reaches a checkpoint:
+After training completes or reaches a checkpoint, edit `launch_visualize.sh` to update:
+- `#SBATCH -A lrn036` → your project allocation
+- `conda activate` path → your conda environment
+- `../configs/interm_8m_ft.yaml` → your config file
+
+For visualization, ensure your config file specifies:
+```yaml
+trainer:
+  pretrain: /path/to/your/checkpoint.pth  # Path to trained model checkpoint
+```
+
+Then submit the visualization job:
 ```bash
 sbatch launch_visualize.sh
 ```
 
 This will generate visualization outputs for:
-- Input ERA5 data at low resolution
+- Input low-resolution data
 - ORBIT-2 downscaled predictions at high resolution
 - Comparison metrics
+
+Note: Currently visualizes test sample at index=0. Future updates will allow custom sample selection.
 
 #### Example Output
 Training on 1 node (8 GPUs) with the 8M model typically:

@@ -57,11 +57,70 @@ Choose an appropriate configuration file from `configs/`:
 - `interm_10b.yaml`: 10B parameter model (requires more nodes)
 
 Key parameters to modify:
+
+**Model Configuration:**
+```yaml
+model:
+  preset: res_slimvit  # Model architecture: 'res_slimvit' (ORBIT-2) or 'vit' (standard ViT)
+  lr: 2e-3             # Learning rate
+  superres_mag: 4      # Super-resolution magnification factor
+  patch_size: 2        # Patch size for vision transformer
+  embed_dim: 256       # Embedding dimension (increase for larger models)
+  depth: 6             # Number of transformer blocks
+  decoder_depth: 4     # Number of decoder layers
+  num_heads: 4         # Number of attention heads
+```
+
+**Data Configuration:**
+```yaml
+data:
+  # Select datasets by uncommenting desired options
+  low_res_dir: {
+    # ERA5 global reanalysis data
+    #'ERA5_1': "/path/to/era5/5.625_deg/",  # ~625km resolution
+    #'ERA5_2': "/path/to/era5/1.0_deg/",    # ~111km resolution
+    
+    # PRISM regional climate data (CONUS)
+    'PRISM': "/path/to/prism/10.0_arcmin",   # ~18km resolution
+    
+    # DAYMET regional climate data (North America)
+    #'DAYMET_1': "/path/to/daymet/10.0_arcmin",  # ~18km resolution
+    #'DAYMET_2': "/path/to/daymet/2.0_arcmin",   # ~4km resolution
+  }
+  
+  high_res_dir: {
+    # Target high-resolution data
+    #'ERA5_1': "/path/to/era5/1.40625_deg/",     # ~156km resolution
+    #'ERA5_2': "/path/to/era5/0.25_deg/",        # ~28km resolution
+    'PRISM': "/path/to/prism/2.5_arcmin",        # ~4.5km resolution
+    #'DAYMET_1': "/path/to/daymet/2.5_arcmin",   # ~4.5km resolution
+    #'DAYMET_2': "/path/to/daymet/0.5_arcmin",   # ~0.9km resolution
+  }
+
+  # Variables to use for training (modify based on dataset)
+  dict_out_variables: {
+    'PRISM': [
+      "total_precipitation_24hr",  # Daily precipitation
+      "2m_temperature_min",        # Daily minimum temperature
+      "2m_temperature_max",        # Daily maximum temperature
+    ],
+    'ERA5_1': [
+      "total_precipitation_24hr",
+      "2m_temperature_min",
+      "2m_temperature_max",
+      #"10m_u_component_of_wind",  # Uncomment for wind variables
+      #"10m_v_component_of_wind",
+    ],
+  }
+```
+
+**Training Configuration:**
 ```yaml
 trainer:
   max_epochs: 100      # Training epochs
   batch_size: 32       # Batch size per GPU
   data_type: bfloat16  # Use bfloat16 for memory efficiency
+  train_loss: "bayesian_tv"  # Loss function: 'mse', 'bayesian_tv', 'perceptual'
 
 parallelism:
   fsdp: 4              # Fully Sharded Data Parallel

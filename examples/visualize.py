@@ -65,14 +65,22 @@ def load_pretrained_weights(
     local_rank = int(os.environ["SLURM_LOCALID"])
 
     # Adjust path for tensor parallel checkpoints
-    if tensor_par_size > 1:
+    if tensor_par_size > 1 and pretrain_path is not None:
         pretrain_path = pretrain_path + "_" + "rank" + "_" + str(world_rank)
 
     print("world_rank", world_rank, "pretrain_path", pretrain_path, flush=True)
 
     # load pretrained model
     if world_rank < tensor_par_size:
-        if os.path.exists(pretrain_path):
+        if pretrain_path is None:
+            print(
+                "world_rank",
+                world_rank,
+                "No pretrained model path provided in config.",
+                flush=True,
+            )
+            sys.exit("pretrain_path is None - please specify pretrain path in config file")
+        elif os.path.exists(pretrain_path):
             print(
                 "world_rank",
                 world_rank,

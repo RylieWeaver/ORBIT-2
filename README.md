@@ -32,17 +32,40 @@ TILES is a ViT training algorithm that reduces ViT’s self-attention complexity
 
 
 ## Installation
-**To Do: Isaac, please fill in here. Provide clear installation instructions. Specify all dependencies (requirements.txt or equivalent).
+In order to run the code, we provide the instructions below for creating a conda environment with the necessary packages. Follow the instructions according to the respective GPU type (AMD or NVIDIA) that you will be utilizing.
 
-(1) Install your conda environment
-(2) Then do pip install -e . to install the package to the environment
-(3) Do  pip install -r requirements.txt
+### Frontier (Systems with AMD GPUs)
+```
+conda create -n orbit python=3.11 -y
+conda activate orbit
+pip install torch==2.8.0+rocm6.4 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/rocm6.4
+pip install -U xformers==0.0.32 --index-url https://download.pytorch.org/whl/rocm6.4
+MPICC="cc -shared" pip install --no-cache-dir --no-binary=mpi4py mpi4py
+pip install -e .
+```
+
+### DGX (System with NVIDIA GPUs)
+```
+conda create -n orbit python=3.11 -y
+conda activate orbit
+pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu129
+pip3 install -U xformers==0.0.32 --index-url https://download.pytorch.org/whl/cu129
+conda install -c conda-forge mpi4py mpich
+pip install -e .
+
+```
 
 
 
 ## Tutorial Example
 **To Do: Hong-Jun, fill in here for frontier supercomputer example.
-**Isaac, fill in here for the DGX box example. 
+
+### DGX
+1. Modify your config file making sure that fsdp x simple_ddp x tensor_par_ranks = [NUM_GPUS]
+2. Set gpu_type to `nvidia` in your config file
+3. Enter the examples directory
+4. Run the the training script with `mpirun -n [NUM_GPUS] python -u intermediate_downscaling.py [CONFIG_FILE] MPI` 
+
 
 
 ## Hyperparameter Configuration

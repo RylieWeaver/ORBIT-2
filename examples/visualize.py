@@ -157,27 +157,7 @@ def main():
     4. Loads pretrained weights
     5. Runs visualization on specified data samples
     """
-    # Set environment variables
-    os.environ["MASTER_ADDR"] = str(os.environ["HOSTNAME"])
-    os.environ["MASTER_PORT"] = args.master_port
-    os.environ["WORLD_SIZE"] = os.environ["SLURM_NTASKS"]
-    os.environ["RANK"] = os.environ["SLURM_PROCID"]
-
-    world_size = int(os.environ["SLURM_NTASKS"])
-    world_rank = int(os.environ["SLURM_PROCID"])
-    local_rank = int(os.environ["SLURM_LOCALID"])
-
-    torch.cuda.set_device(local_rank)
-    device = torch.cuda.current_device()
-
-    torch.distributed.init_process_group(
-        "nccl",
-        timeout=timedelta(seconds=7200000),
-        rank=world_rank,
-        world_size=world_size,
-    )
-
-    # Parse command line arguments
+    # Parse command line arguments first
     parser = ArgumentParser(description="Visualize ORBIT-2 model outputs")
     parser.add_argument("config", type=str, help="Path to configuration YAML file")
     parser.add_argument(
@@ -206,6 +186,26 @@ def main():
         help="Override data type from config (default: use config value)",
     )
     args = parser.parse_args()
+    
+    # Set environment variables
+    os.environ["MASTER_ADDR"] = str(os.environ["HOSTNAME"])
+    os.environ["MASTER_PORT"] = args.master_port
+    os.environ["WORLD_SIZE"] = os.environ["SLURM_NTASKS"]
+    os.environ["RANK"] = os.environ["SLURM_PROCID"]
+
+    world_size = int(os.environ["SLURM_NTASKS"])
+    world_rank = int(os.environ["SLURM_PROCID"])
+    local_rank = int(os.environ["SLURM_LOCALID"])
+
+    torch.cuda.set_device(local_rank)
+    device = torch.cuda.current_device()
+
+    torch.distributed.init_process_group(
+        "nccl",
+        timeout=timedelta(seconds=7200000),
+        rank=world_rank,
+        world_size=world_size,
+    )
 
     config_path = args.config
 

@@ -38,12 +38,10 @@ from climate_learn.models.hub.components.cnn_blocks import (
 )
 from climate_learn.utils.fused_attn import FusedAttn
 from climate_learn.models.hub.components.pos_embed import interpolate_pos_embed
-from climate_learn.dist.profile import *
 
 
-def load_checkpoint_pretrain(model, checkpoint_path, pretrain_path, cp_save_path, tensor_par_size=1,tensor_par_group=None):
+def load_checkpoint_pretrain(model, checkpoint_path, pretrain_path, cp_save_path, local_rank, tensor_par_size=1,tensor_par_group=None):
     world_rank = dist.get_rank()
-    local_rank = int(os.environ['SLURM_LOCALID'])
 
     #load model checkpoint
     if checkpoint_path is not None and world_rank < tensor_par_size:
@@ -380,11 +378,10 @@ def seed_everything(seed):
     torch.backends.cudnn.deterministic = True
 
 
-def main(device):
+def main(device, local_rank):
 
-    world_size = int(os.environ['SLURM_NTASKS'])
+    world_size = dist.get_world_size()
     world_rank = dist.get_rank()
-    local_rank = int(os.environ['SLURM_LOCALID'])
 
 
     print("world_size",world_size,"world_rank",world_rank,"local_rank",local_rank,flush=True)
@@ -402,6 +399,7 @@ def main(device):
     num_workers = conf['trainer']['num_workers']
     buffer_size = conf['trainer']['buffer_size']
     data_type = conf['trainer']['data_type']
+    gpu_type = conf['trainer']['gpu_type']
     train_loss_str = conf['trainer']['train_loss'] 
     pretrain_path = conf['trainer']['pretrain']
 
@@ -455,17 +453,19 @@ def main(device):
     data_par_size = fsdp_size * simple_ddp_size
 
     if world_rank==0:
-        print("max_epochs",max_epochs," ",checkpoint_path," ",pretrain_path," ",low_res_dir," ",high_res_dir,"spatial_resolution",spatial_resolution,"default_vars",default_vars,"preset",preset,"lr",lr,"beta_1",beta_1,"beta_2",beta_2,"weight_decay",weight_decay,"warmup_epochs",warmup_epochs,"warmup_start_lr",warmup_start_lr,"eta_min",eta_min,"superres_mag",superres_mag,"cnn_ratio",cnn_ratio,"patch_size",patch_size,"embed_dim",embed_dim,"depth",depth,"decoder_depth",decoder_depth,"num_heads",num_heads,"mlp_ratio",mlp_ratio,"drop_path",drop_path,"drop_rate",drop_rate,"batch_size",batch_size,"num_workers",num_workers,"buffer_size",buffer_size,"data_type",data_type,"train_loss_str",train_loss_str,flush=True)
+        print("max_epochs",max_epochs," ",checkpoint_path," ",pretrain_path," ",low_res_dir," ",high_res_dir,"spatial_resolution",spatial_resolution,"default_vars",default_vars,"preset",preset,"lr",lr,"beta_1",beta_1,"beta_2",beta_2,"weight_decay",weight_decay,"warmup_epochs",warmup_epochs,"warmup_start_lr",warmup_start_lr,"eta_min",eta_min,"superres_mag",superres_mag,"cnn_ratio",cnn_ratio,"patch_size",patch_size,"embed_dim",embed_dim,"depth",depth,"decoder_depth",decoder_depth,"num_heads",num_heads,"mlp_ratio",mlp_ratio,"drop_path",drop_path,"drop_rate",drop_rate,"batch_size",batch_size,"num_workers",num_workers,"buffer_size",buffer_size,"data_type",data_type,"gpu_type",gpu_type,"train_loss_str",train_loss_str,flush=True)
         print("data_par_size",data_par_size,"fsdp_size",fsdp_size,"simple_ddp_size",simple_ddp_size,"tensor_par_size",tensor_par_size,"seq_par_size",seq_par_size,"division",div,"overlap",overlap,flush=True)
 
     #initialize parallelism groups
     seq_par_group, data_par_group, tensor_par_group, data_seq_ort_group, fsdp_group, simple_ddp_group = init_par_groups(data_par_size = data_par_size, tensor_par_size = tensor_par_size, seq_par_size = seq_par_size, fsdp_size = fsdp_size, simple_ddp_size = simple_ddp_size, num_heads= num_heads)
 
-
-    if data_type == "bfloat16":
-        FusedAttn_option = FusedAttn.CK
+    if gpu_type == "amd"
+        if data_type == "bfloat16":
+            FusedAttn_option = FusedAttn.CK
+        else:
+           FusedAttn_option = FusedAttn.DEFAULT
     else:
-       FusedAttn_option = FusedAttn.DEFAULT
+        FusedAttn_option = FusedAttn.DEFAULT
 
     model_kwargs = {'default_vars':default_vars,'superres_mag':superres_mag,'cnn_ratio':cnn_ratio,'patch_size':patch_size,'embed_dim':embed_dim,'depth':depth,'decoder_depth':decoder_depth,'num_heads':num_heads,'mlp_ratio':mlp_ratio,'drop_path':drop_path,'drop_rate':drop_rate, 'tensor_par_size':tensor_par_size, 'tensor_par_group':tensor_par_group,"FusedAttn_option":FusedAttn_option}
 
@@ -567,7 +567,7 @@ def main(device):
                         print(name, param.data.shape)
     
                 # load from checkpoint for continued training , or from pretrained model weights
-                load_checkpoint_pretrain(model, checkpoint_path, pretrain_path,cp_save_path,tensor_par_size=tensor_par_size,tensor_par_group=tensor_par_group)
+                load_checkpoint_pretrain(model, checkpoint_path, pretrain_path,cp_save_path,local_rank,tensor_par_size=tensor_par_size,tensor_par_group=tensor_par_group)
     
     
     
@@ -837,18 +837,45 @@ def main(device):
 
 if __name__ == "__main__":
 
-    os.environ['MASTER_ADDR'] = str(os.environ['HOSTNAME'])
+    if len(sys.argv) > 2:
+        LAUNCHER = sys.argv[2]
+    else:
+        LAUNCHER = None
+    if LAUNCHER == "MPI":
+        from mpi4py import MPI
+        import socket
+
+        num_gpus_per_node = torch.cuda.device_count()
+        comm = MPI.COMM_WORLD
+        world_size = comm.Get_size()
+        world_rank = rank = comm.Get_rank()
+        local_rank = int(rank) % int(num_gpus_per_node) if num_gpus_per_node>0 else 0 # local_rank and device are 0 when using 1 GPU per task
+        os.environ['WORLD_SIZE'] = str(world_size)
+        os.environ['RANK'] = str(world_rank)
+        os.environ['LOCAL_RANK'] = str(local_rank)
+
+        master_addr = None
+        if rank == 0:
+            hostname = socket.gethostname()
+            ip_address = socket.gethostbyname(hostname)
+            master_addr = ip_address
+        master_addr = comm.bcast(master_addr, root=0)
+        os.environ['MASTER_ADDR'] = master_addr
+        torch.cuda.set_device(local_rank)
+        device = torch.device(local_rank) if torch.cuda.is_available() else torch.device("cpu")
+    else:
+        os.environ['MASTER_ADDR'] = str(os.environ['HOSTNAME'])
+        os.environ['WORLD_SIZE'] = os.environ['SLURM_NTASKS']
+        os.environ['RANK'] = os.environ['SLURM_PROCID']
+
+        world_size = int(os.environ['SLURM_NTASKS'])
+        world_rank = int(os.environ['SLURM_PROCID'])
+        local_rank = int(os.environ['SLURM_LOCALID'])
+
+        torch.cuda.set_device(local_rank)
+        device = torch.cuda.current_device()
+
     os.environ['MASTER_PORT'] = "29500"
-    os.environ['WORLD_SIZE'] = os.environ['SLURM_NTASKS']
-    os.environ['RANK'] = os.environ['SLURM_PROCID']
-
-    world_size = int(os.environ['SLURM_NTASKS'])
-    world_rank = int(os.environ['SLURM_PROCID'])
-    local_rank = int(os.environ['SLURM_LOCALID'])
-
-    torch.cuda.set_device(local_rank)
-    device = torch.cuda.current_device()
-
 
     dist.init_process_group('nccl', timeout=timedelta(seconds=7200000), rank=world_rank, world_size=world_size)
 
@@ -858,7 +885,7 @@ if __name__ == "__main__":
     ## GPTL timer init
     #gp.initialize()
 
-    main(device)
+    main(device, local_rank)
 
     ## GPTL timer output
     #output_dir = os.getenv("OUTPUT_DIR", "")

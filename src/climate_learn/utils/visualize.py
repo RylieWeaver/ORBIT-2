@@ -314,11 +314,13 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,var
     img_min = np.min(inputs)
     img_max = np.max(inputs)
 
+    # Initialize anim variable for all ranks
+    anim = None
+    
     # Only rank 0 saves the input image
     if torch.distributed.get_rank() == 0:
         plt.figure(figsize=(inputs.shape[1]/100,inputs.shape[0]/100))
         plt.imshow(inputs,cmap='coolwarm',vmin=img_min,vmax=img_max)
-        anim = None
         plt.show()
         name = '0_input.png' 
         plt.savefig(name)

@@ -193,6 +193,12 @@ def main():
         default=None,
         help="Override data type from config (default: use config value)",
     )
+    parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default=None,
+        help="Path to model checkpoint file (.ckpt). If provided, overrides the 'pretrain' path in config file",
+    )
     args = parser.parse_args()
     
     # Set environment variables
@@ -227,7 +233,16 @@ def main():
     batch_size = conf["trainer"]["batch_size"]
     num_workers = conf["trainer"]["num_workers"]
     buffer_size = conf["trainer"]["buffer_size"]
-    pretrain_path = conf["trainer"]["pretrain"]
+    
+    # Priority: 1) Command line argument, 2) Config pretrain path
+    if args.checkpoint:
+        pretrain_path = args.checkpoint
+        if world_rank == 0:
+            print(f"Using checkpoint from command line: {pretrain_path}", flush=True)
+    else:
+        pretrain_path = conf["trainer"]["pretrain"]
+        if world_rank == 0:
+            print(f"Using checkpoint from config: {pretrain_path}", flush=True)
     # Use command line override if provided, otherwise use config value
     # Force float32 for visualization to avoid numpy conversion issues with bfloat16
     data_type = args.data_type or "float32"

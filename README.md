@@ -177,10 +177,18 @@ After training completes or reaches a checkpoint, edit `launch_visualize.sh` to 
 - `conda activate` path → your conda environment
 - `../configs/interm_8m_ft.yaml` → your config file
 
-For visualization, ensure your config file specifies:
+For visualization, you have two options to specify the checkpoint:
+
+**Option 1: Using config file (default)**
 ```yaml
 trainer:
-  pretrain: /path/to/your/checkpoint.pth  # Path to trained model checkpoint
+  pretrain: /path/to/your/checkpoint.ckpt  # Path to trained model checkpoint
+```
+
+**Option 2: Using command line argument (overrides config)**
+```bash
+# Edit launch_visualize.sh to add --checkpoint argument:
+python ./visualize.py ../configs/interm_8m_ft.yaml --checkpoint /path/to/custom/checkpoint.ckpt
 ```
 
 Then submit the visualization job:
@@ -193,7 +201,10 @@ This will generate visualization outputs for:
 - ORBIT-2 downscaled predictions at high resolution
 - Comparison metrics
 
-Note: Currently visualizes test sample at index=0. Future updates will allow custom sample selection.
+Additional visualization options:
+- `--index N`: Visualize test sample at index N (default: 0)
+- `--variable VAR`: Variable to visualize (default: total_precipitation_24hr)
+- `--checkpoint PATH`: Override checkpoint path from config file
 
 #### Example Output
 Training on 1 node (8 GPUs) with the 8M model typically:

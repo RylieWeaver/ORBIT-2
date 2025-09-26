@@ -314,13 +314,14 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,var
     img_min = np.min(inputs)
     img_max = np.max(inputs)
 
-  
-    plt.figure(figsize=(inputs.shape[1]/100,inputs.shape[0]/100))
-    plt.imshow(inputs,cmap='coolwarm',vmin=img_min,vmax=img_max)
-    anim = None
-    plt.show()
-    name = str(torch.distributed.get_rank())+ '_input.png' 
-    plt.savefig(name)
+    # Only rank 0 saves the input image
+    if torch.distributed.get_rank() == 0:
+        plt.figure(figsize=(inputs.shape[1]/100,inputs.shape[0]/100))
+        plt.imshow(inputs,cmap='coolwarm',vmin=img_min,vmax=img_max)
+        anim = None
+        plt.show()
+        name = '0_input.png' 
+        plt.savefig(name)
 
     print("img.shape",inputs.shape,"min",img_min,"max",img_max,flush=True)
 
@@ -329,14 +330,14 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,var
     ppred_min = np.min(preds)
     ppred_max = np.max(preds)
 
-
-    plt.figure(figsize=(preds.shape[1]/100,preds.shape[0]/100))
-    plt.imshow(preds,cmap='coolwarm',vmin=img_min,vmax=img_max)
-    plt.show()
-    name = str(torch.distributed.get_rank())+'_prediction.png'
-    plt.savefig(name)
-    np.save(str(torch.distributed.get_rank())+'_preds.npy', preds )
-
+    # Only rank 0 saves the prediction image
+    if torch.distributed.get_rank() == 0:
+        plt.figure(figsize=(preds.shape[1]/100,preds.shape[0]/100))
+        plt.imshow(preds,cmap='coolwarm',vmin=img_min,vmax=img_max)
+        plt.show()
+        name = '0_prediction.png'
+        plt.savefig(name)
+        np.save('0_preds.npy', preds)
 
     print("ppred.shape",preds.shape,"min",ppred_min,"max",ppred_max,flush=True)
 
@@ -347,12 +348,14 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,var
         if groundtruths.shape[0]!=preds.shape[0] or groundtruths.shape[1]!=preds.shape[1]:
             groundtruths= groundtruths[0:preds.shape[0],0:preds.shape[1]]
 
-        plt.figure(figsize=(groundtruths.shape[1]/100,groundtruths.shape[0]/100))
-        plt.imshow(groundtruths,cmap='coolwarm',vmin=img_min,vmax=img_max)
-        plt.show()
-        name = str(torch.distributed.get_rank())+'_truth.png'
-        plt.savefig(name)
-        np.save(str(torch.distributed.get_rank())+'_truth.npy', groundtruths )
+        # Only rank 0 saves the ground truth image
+        if torch.distributed.get_rank() == 0:
+            plt.figure(figsize=(groundtruths.shape[1]/100,groundtruths.shape[0]/100))
+            plt.imshow(groundtruths,cmap='coolwarm',vmin=img_min,vmax=img_max)
+            plt.show()
+            name = '0_truth.png'
+            plt.savefig(name)
+            np.save('0_truth.npy', groundtruths)
 
 
     

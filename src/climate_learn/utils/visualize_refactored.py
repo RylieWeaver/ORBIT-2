@@ -277,8 +277,7 @@ def process_single_tile(model, x_tile: torch.Tensor, y_tile: torch.Tensor,
                        in_channel: int, out_channel: int,
                        in_transform, out_transform, 
                        device: torch.device, src: str,
-                       adj_index: int, coords: TileCoordinates,
-                       processor: 'TileProcessor') -> Dict[str, np.ndarray]:
+                       adj_index: int, coords: TileCoordinates) -> Dict[str, np.ndarray]:
     """Process a single tile and return the results."""
     # Move to device and run inference
     x_tile = x_tile.to(device)
@@ -306,7 +305,7 @@ def process_single_tile(model, x_tile: torch.Tensor, y_tile: torch.Tensor,
         yy = np.flip(yy, 0)
         
         # Adjust coordinates for flipped images
-        coords = adjust_coords_for_flip(coords, processor)
+        coords = adjust_coords_for_flip(coords, img.shape, ppred.shape)
     
     return {
         'input': img,
@@ -317,30 +316,32 @@ def process_single_tile(model, x_tile: torch.Tensor, y_tile: torch.Tensor,
 
 
 def adjust_coords_for_flip(coords: TileCoordinates, 
-                          processor: 'TileProcessor') -> TileCoordinates:
-    """Adjust coordinates after image flip - matches original logic."""
-    # Based on original code logic for flipped images
-    # Input coordinates
-    yi2tp = processor.yinp // processor.div + (processor.top + processor.bottom) - coords.yi1t
-    yi1tp = processor.yinp // processor.div + (processor.top + processor.bottom) - coords.yi2t
-    coords.yi1t = yi1tp
-    coords.yi2t = yi2tp
+                          input_shape: Tuple[int, int],
+                          output_shape: Tuple[int, int]) -> TileCoordinates:
+    """Adjust coordinates after image flip."""
+    yinp, _ = input_shape
+    yout, _ = output_shape
     
-    yi2rp = processor.yinp - coords.yi1r
-    yi1rp = processor.yinp - coords.yi2r
-    coords.yi1r = yi1rp
-    coords.yi2r = yi2rp
+    # Flip vertical coordinates
+    yi1t_new = yinp - coords.yi2t
+    yi2t_new = yinp - coords.yi1t
+    coords.yi1t = yi1t_new
+    coords.yi2t = yi2t_new
     
-    # Output coordinates
-    yo2tp = processor.yout // processor.div + (processor.top + processor.bottom) * processor.vmul - coords.yo1t
-    yo1tp = processor.yout // processor.div + (processor.top + processor.bottom) * processor.vmul - coords.yo2t
-    coords.yo1t = yo1tp
-    coords.yo2t = yo2tp
+    yi1r_new = yinp - coords.yi2r
+    yi2r_new = yinp - coords.yi1r
+    coords.yi1r = yi1r_new
+    coords.yi2r = yi2r_new
     
-    yo2rp = processor.yout - coords.yo1r
-    yo1rp = processor.yout - coords.yo2r
-    coords.yo1r = yo1rp
-    coords.yo2r = yo2rp
+    yo1t_new = yout - coords.yo2t
+    yo2t_new = yout - coords.yo1t
+    coords.yo1t = yo1t_new
+    coords.yo2t = yo2t_new
+    
+    yo1r_new = yout - coords.yo2r
+    yo2r_new = yout - coords.yo1r
+    coords.yo1r = yo1r_new
+    coords.yo2r = yo2r_new
     
     return coords
 
@@ -515,7 +516,7 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,
             tile_result = process_single_tile(
                 mm, x_tile, y_tile, in_variables, out_variables,
                 in_channel, out_channel, in_transform, out_transform,
-                device, src, adj_index, coords, processor
+                device, src, adj_index, coords
             )
             
             tiles.append(tile_result)
@@ -543,11 +544,6 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,
         if dist.get_rank() == 0:
             logger.info(f"Metrics - PSNR: {metrics['psnr']:.4f}, SSIM: {metrics['ssim']:.4f}")
             print(f"Goodness of fit: PSNR {metrics['psnr']:.6f}, SSIM {metrics['ssim']:.6f}")
-    
-    # For backward compatibility - print basic info
-    if dist.get_rank() == 0:
-        print(f"img.shape {images['input'].shape}, min {images['input'].min()}, max {images['input'].max()}")
-        print(f"ppred.shape {images['prediction'].shape}, min {images['prediction'].min()}, max {images['prediction'].max()}")
     
     return None  # For compatibility with existing code
 

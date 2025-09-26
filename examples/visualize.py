@@ -571,32 +571,24 @@ def main():
     # Set the model to evaluation mode (disable dropout, batch norm training, etc.)
     model.eval()
 
-    # Only rank 0 performs visualization to avoid duplicate outputs
-    if world_rank == 0:
-        print("Starting visualization on rank 0...", flush=True)
-        
-        # Run visualization on specified sample and variable
-        cl.utils.visualize.visualize_at_index(
-            model,
-            data_module,
-            dm_vis,
-            out_list=out_vars,
-            in_transform=denorm,
-            out_transform=denorm,
-            variable=args.variable,  # Variable to visualize
-            src=data_key,
-            device=device,
-            div=div,
-            overlap=overlap,
-            index=args.index,  # Sample index to visualize
-            tensor_par_size=tensor_par_size,
-            tensor_par_group=tensor_par_group,
-        )
-    else:
-        print(f"Rank {world_rank} skipping visualization (only rank 0 performs visualization)", flush=True)
-
-    # All ranks must wait for rank 0 to complete visualization
-    dist.barrier()
+    # Run visualization on specified sample and variable
+    # Note: All ranks must participate in visualization due to potential distributed operations
+    cl.utils.visualize.visualize_at_index(
+        model,
+        data_module,
+        dm_vis,
+        out_list=out_vars,
+        in_transform=denorm,
+        out_transform=denorm,
+        variable=args.variable,  # Variable to visualize
+        src=data_key,
+        device=device,
+        div=div,
+        overlap=overlap,
+        index=args.index,  # Sample index to visualize
+        tensor_par_size=tensor_par_size,
+        tensor_par_group=tensor_par_group,
+    )
 
     # Clean up distributed process group
     dist.destroy_process_group()

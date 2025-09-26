@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Tuple, List, Optional, Dict, Any
 import logging
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
+from scipy.stats import rankdata
 
 from ..data.processing.era5_constants import VAR_TO_UNIT as ERA5_VAR_TO_UNIT
 from ..data.processing.cmip6_constants import VAR_TO_UNIT as CMIP6_VAR_TO_UNIT
@@ -552,7 +553,7 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,
     return None  # For compatibility with existing code
 
 
-# Backward compatibility - keep old function name
+# Backward compatibility - keep old function names
 def visualize_sample(img, extent, title, vmin=-1, vmax=-1):
     """Legacy visualization function for single sample."""
     fig, ax = plt.subplots()
@@ -571,3 +572,76 @@ def visualize_sample(img, extent, title, vmin=-1, vmax=-1):
     plt.colorbar(im, ax=ax)
     plt.tight_layout()
     return fig
+
+
+def visualize_mean_bias(dm, mm, out_transform, variable, src):
+    """Visualize mean bias between predictions and observations."""
+    from tqdm import tqdm
+    
+    lat, lon = dm.get_lat_lon()
+    extent = [lon.min(), lon.max(), lat.min(), lat.max()]
+    channel = dm.out_vars.index(variable)
+    
+    if src == "era5":
+        variable_with_units = f"{variable} ({ERA5_VAR_TO_UNIT[variable]})"
+    elif src == "cmip6":
+        variable_with_units = f"{variable} ({CMIP6_VAR_TO_UNIT[variable]})"
+    elif src == "prism":
+        variable_with_units = f"Daily Max Temperature (C)"
+    else:
+        raise NotImplementedError(f"{src} is not a supported source")
+
+    all_biases = []
+    for batch in tqdm(dm.test_dataloader()):
+        x, y = batch[:2]
+        x = x.to(mm.device)
+        y = y.to(mm.device)
+        pred = mm.forward(x)
+        pred = out_transform(pred)[:, channel].detach().cpu().numpy()
+        obs = out_transform(y)[:, channel].detach().cpu().numpy()
+        bias = pred - obs
+        all_biases.append(bias)
+
+    fig, ax = plt.subplots()
+    all_biases = np.concatenate(all_biases)
+    mean_bias = np.mean(all_biases, axis=0)
+    
+    if src == "era5":
+        mean_bias = np.flip(mean_bias, 0)
+        
+    ax.imshow(mean_bias, cmap=plt.cm.coolwarm, extent=extent)
+    ax.set_title(f"Mean Bias: {variable_with_units}")
+
+    cax = fig.add_axes([
+        ax.get_position().x1 + 0.02,
+        ax.get_position().y0,
+        0.02,
+        ax.get_position().y1 - ax.get_position().y0,
+    ])
+    fig.colorbar(ax.get_images()[0], cax=cax)
+    plt.show()
+
+
+# based on https://github.com/oliverangelil/rankhistogram/tree/master
+def rank_histogram(obs, ensemble, channel):
+    """Create rank histogram for ensemble predictions."""
+    obs = obs.numpy()[:, channel]
+    ensemble = ensemble.numpy()[:, :, channel]
+    combined = np.vstack((obs[np.newaxis], ensemble))
+    ranks = np.apply_along_axis(lambda x: rankdata(x, method="min"), 0, combined)
+    ties = np.sum(ranks[0] == ranks[1:], axis=0)
+    ranks = ranks[0]
+    tie = np.unique(ties)
+    
+    for i in range(1, len(tie)):
+        idx = ranks[ties == tie[i]]
+        ranks[ties == tie[i]] = [
+            np.random.randint(idx[j], idx[j] + tie[i] + 1, tie[i])[0]
+            for j in range(len(idx))
+        ]
+        
+    hist = np.histogram(
+        ranks, bins=np.linspace(0.5, combined.shape[0] + 0.5, combined.shape[0] + 1)
+    )
+    plt.bar(range(1, ensemble.shape[0] + 2), hist[0])
+    plt.show()

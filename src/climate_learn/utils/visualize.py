@@ -176,7 +176,7 @@ class TileProcessor:
             xi1t=0,
             xi2t=0,
             yi1t=0,
-            yi2t=0,  # Will be set later
+            yi2t=0,
             xo1t=0,
             xo2t=0,
             yo1t=0,

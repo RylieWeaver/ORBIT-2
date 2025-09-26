@@ -275,6 +275,7 @@ def load_test_sample(dm_vis, index: int) -> Tuple[torch.Tensor, torch.Tensor, An
 
 def process_single_tile(model, x_tile: torch.Tensor, y_tile: torch.Tensor,
                        in_variables: List[str], out_variables: List[str],
+                       out_list: List[str],
                        in_channel: int, out_channel: int,
                        in_transform, out_transform, 
                        device: torch.device, src: str,
@@ -289,7 +290,7 @@ def process_single_tile(model, x_tile: torch.Tensor, y_tile: torch.Tensor,
     # Process input
     xx = x_tile[adj_index]
     temp = xx[in_channel]
-    temp = temp.repeat(len(out_variables), 1, 1)
+    temp = temp.repeat(len(out_list), 1, 1)
     img = in_transform(temp)[out_channel].detach().cpu().numpy()
     
     # Process prediction
@@ -396,18 +397,16 @@ def save_visualization(images: Dict[str, np.ndarray],
     plt.figure(figsize=(images['input'].shape[1] / config.figure_dpi,
                        images['input'].shape[0] / config.figure_dpi))
     plt.imshow(images['input'], cmap=config.colormap, vmin=img_min, vmax=img_max)
-    plt.axis('off')
-    plt.tight_layout()
-    plt.savefig('0_input.png', bbox_inches='tight', dpi=config.figure_dpi)
+    plt.show()
+    plt.savefig('0_input.png')
     plt.close()
     
     # Save prediction
     plt.figure(figsize=(images['prediction'].shape[1] / config.figure_dpi,
                        images['prediction'].shape[0] / config.figure_dpi))
     plt.imshow(images['prediction'], cmap=config.colormap, vmin=img_min, vmax=img_max)
-    plt.axis('off')
-    plt.tight_layout()
-    plt.savefig('0_prediction.png', bbox_inches='tight', dpi=config.figure_dpi)
+    plt.show()
+    plt.savefig('0_prediction.png')
     plt.close()
     
     if config.save_numpy:
@@ -418,9 +417,8 @@ def save_visualization(images: Dict[str, np.ndarray],
         plt.figure(figsize=(images['ground_truth'].shape[1] / config.figure_dpi,
                            images['ground_truth'].shape[0] / config.figure_dpi))
         plt.imshow(images['ground_truth'], cmap=config.colormap, vmin=img_min, vmax=img_max)
-        plt.axis('off')
-        plt.tight_layout()
-        plt.savefig('0_truth.png', bbox_inches='tight', dpi=config.figure_dpi)
+        plt.show()
+        plt.savefig('0_truth.png')
         plt.close()
         
         if config.save_numpy:
@@ -514,7 +512,7 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,
             
             # Process tile
             tile_result = process_single_tile(
-                mm, x_tile, y_tile, in_variables, out_variables,
+                mm, x_tile, y_tile, in_variables, out_variables, out_list,
                 in_channel, out_channel, in_transform, out_transform,
                 device, src, adj_index, coords, processor
             )

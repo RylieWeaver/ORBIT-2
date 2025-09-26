@@ -25,38 +25,44 @@ FLIP_REQUIRED_SOURCES = {"ERA5", "PRISM", "DAYMET"}
 
 @dataclass
 class TileCoordinates:
-    """Container for tile coordinate mappings."""
-    # Input coordinates
-    xi1: int  # Start x coordinate in input
-    xi2: int  # End x coordinate in input
-    yi1: int  # Start y coordinate in input
-    yi2: int  # End y coordinate in input
+    """Container for tile coordinate mappings.
     
-    # Output coordinates
-    xo1: int  # Start x coordinate in output
-    xo2: int  # End x coordinate in output
-    yo1: int  # Start y coordinate in output
-    yo2: int  # End y coordinate in output
+    This class manages three coordinate systems:
+    1. Global coordinates: Position in the full image (xi1, xi2, yi1, yi2 for input; xo1, xo2, yo1, yo2 for output)
+    2. Tile coordinates: What portion to extract from the processed tile (xi1t, xi2t, yi1t, yi2t for input; xo1t, xo2t, yo1t, yo2t for output)
+    3. Result coordinates: Where to place the extracted portion in the final stitched image (xi1r, xi2r, yi1r, yi2r for input; xo1r, xo2r, yo1r, yo2r for output)
+    """
+    # Global coordinates in the full image
+    xi1: int  # Start x coordinate in input image
+    xi2: int  # End x coordinate in input image
+    yi1: int  # Start y coordinate in input image
+    yi2: int  # End y coordinate in input image
     
-    # Tile internal coordinates (what to extract from tile)
-    xi1t: int  # Start x in tile
-    xi2t: int  # End x in tile
-    yi1t: int  # Start y in tile
-    yi2t: int  # End y in tile
-    xo1t: int  # Start x in output tile
-    xo2t: int  # End x in output tile
-    yo1t: int  # Start y in output tile
-    yo2t: int  # End y in output tile
+    # Global coordinates in the full output image
+    xo1: int  # Start x coordinate in output image
+    xo2: int  # End x coordinate in output image
+    yo1: int  # Start y coordinate in output image
+    yo2: int  # End y coordinate in output image
     
-    # Result placement coordinates (where to place in final image)
-    xi1r: int  # Start x in result
-    xi2r: int  # End x in result  
-    yi1r: int  # Start y in result
-    yi2r: int  # End y in result
-    xo1r: int  # Start x in output result
-    xo2r: int  # End x in output result
-    yo1r: int  # Start y in output result
-    yo2r: int  # End y in output result
+    # Tile extraction coordinates (accounting for overlap)
+    xi1t: int  # Start x to extract from input tile
+    xi2t: int  # End x to extract from input tile
+    yi1t: int  # Start y to extract from input tile
+    yi2t: int  # End y to extract from input tile
+    xo1t: int  # Start x to extract from output tile
+    xo2t: int  # End x to extract from output tile
+    yo1t: int  # Start y to extract from output tile
+    yo2t: int  # End y to extract from output tile
+    
+    # Final placement coordinates in stitched result
+    xi1r: int  # Start x in final input result
+    xi2r: int  # End x in final input result  
+    yi1r: int  # Start y in final input result
+    yi2r: int  # End y in final input result
+    xo1r: int  # Start x in final output result
+    xo2r: int  # End x in final output result
+    yo1r: int  # Start y in final output result
+    yo2r: int  # End y in final output result
 
 
 @dataclass
@@ -72,24 +78,37 @@ class VisualizationConfig:
 
 
 class TileProcessor:
-    """Handles tile-based processing for large images."""
+    """Handles tile-based processing for large images.
+    
+    Divides large images into smaller tiles for memory-efficient processing,
+    with configurable overlap to avoid edge artifacts.
+    """
     
     def __init__(self, div: int, overlap: int, input_shape: Tuple[int, int], 
                  output_shape: Tuple[int, int], superres_mag: int):
-        self.div = div
-        self.overlap = overlap
-        self.yinp, self.xinp = input_shape
-        self.yout, self.xout = output_shape
-        self.hmul = self.xout // self.xinp
-        self.vmul = self.yout // self.yinp
+        """
+        Args:
+            div: Number of divisions along each dimension (div x div tiles)
+            overlap: Overlap size between adjacent tiles in pixels
+            input_shape: (height, width) of input image
+            output_shape: (height, width) of output image
+            superres_mag: Super-resolution magnification factor
+        """
+        self.div = div  # Number of divisions per dimension
+        self.overlap = overlap  # Overlap between tiles
+        self.yinp, self.xinp = input_shape  # Input height and width
+        self.yout, self.xout = output_shape  # Output height and width
+        self.hmul = self.xout // self.xinp  # Horizontal magnification
+        self.vmul = self.yout // self.yinp  # Vertical magnification
         
-        # Calculate overlap values
+        # Calculate overlap values for each edge
+        # Overlap is applied differently for horizontal (doubled) vs vertical
         if overlap % 2 == 0:
             self.top = self.bottom = overlap // 2
-            self.left = self.right = overlap // 2 * 2
+            self.left = self.right = overlap // 2 * 2  # Horizontal overlap is doubled
         else:
-            self.left = overlap // 2 * 2
-            self.right = (overlap // 2 + 1) * 2
+            self.left = overlap // 2 * 2  # Even overlap for left
+            self.right = (overlap // 2 + 1) * 2  # Odd overlap for right
             self.top = overlap // 2
             self.bottom = overlap // 2 + 1
             
@@ -97,7 +116,15 @@ class TileProcessor:
                     f"input_shape={input_shape}, output_shape={output_shape}")
     
     def get_tile_coordinates(self, hindex: int, vindex: int) -> TileCoordinates:
-        """Calculate coordinates for a specific tile."""
+        """Calculate coordinates for a specific tile.
+        
+        Args:
+            hindex: Horizontal tile index (0 to div-1)
+            vindex: Vertical tile index (0 to div-1)
+            
+        Returns:
+            TileCoordinates object with all coordinate mappings
+        """
         if self.div == 1:
             # No tiling - use full image
             return TileCoordinates(
@@ -117,7 +144,10 @@ class TileProcessor:
         return coords
     
     def _calculate_base_coords(self, hindex: int, vindex: int) -> TileCoordinates:
-        """Calculate base tile coordinates without overlap."""
+        """Calculate base tile coordinates without overlap.
+        
+        Divides the image into equal tiles based on div parameter.
+        """
         xi1 = self.xinp // self.div * hindex
         xi2 = self.xinp // self.div * (hindex + 1)
         yi1 = self.yinp // self.div * vindex
@@ -214,7 +244,10 @@ class TileProcessor:
 
 
 def min_max_normalize(data: np.ndarray) -> np.ndarray:
-    """Normalize data to [0, 1] range."""
+    """Normalize data to [0, 1] range.
+    
+    Handles edge case where all values are identical (returns zeros).
+    """
     min_val = data.min()
     max_val = data.max()
     if max_val - min_val == 0:
@@ -224,14 +257,24 @@ def min_max_normalize(data: np.ndarray) -> np.ndarray:
 
 def clip_replace_constant(y: torch.Tensor, yhat: torch.Tensor, 
                          out_variables: List[str]) -> torch.Tensor:
-    """Clip precipitation values and replace constants with ground truth."""
+    """Clip precipitation values and replace constants with ground truth.
+    
+    Args:
+        y: Ground truth tensor
+        yhat: Predicted tensor
+        out_variables: List of output variable names
+        
+    Returns:
+        Modified prediction tensor with clipped precipitation and replaced constants
+    """
+    # Ensure precipitation is non-negative (physical constraint)
     try:
         prcp_index = out_variables.index("total_precipitation_24hr")
         torch.clamp_(yhat[:, prcp_index, :, :], min=0.0)
     except ValueError:
         logger.warning("total_precipitation_24hr not found in output variables")
     
-    # Replace constants with ground truth values
+    # Replace predicted constants with ground truth (e.g., land_sea_mask)
     for i, var in enumerate(out_variables):
         if var in CONSTANTS:
             yhat[:, i] = y[:, i]
@@ -240,7 +283,11 @@ def clip_replace_constant(y: torch.Tensor, yhat: torch.Tensor,
 
 
 def should_flip_image(src: str) -> bool:
-    """Check if image should be flipped based on data source."""
+    """Check if image should be flipped vertically based on data source.
+    
+    ERA5, PRISM, and DAYMET data sources require vertical flip
+    due to different coordinate conventions.
+    """
     return any(source in src for source in FLIP_REQUIRED_SOURCES)
 
 
@@ -255,7 +302,15 @@ def get_variable_with_units(variable: str, src: str) -> str:
 
 
 def load_test_sample(dm_vis, index: int) -> Tuple[torch.Tensor, torch.Tensor, Any, Any]:
-    """Load a specific test sample from the data module."""
+    """Load a specific test sample from the data module.
+    
+    Args:
+        dm_vis: Data module for visualization
+        index: Index of the sample to load
+        
+    Returns:
+        Tuple of (x_batch, y_batch, adjusted_index, (in_variables, out_variables))
+    """
     counter = 0
     adj_index = None
     
@@ -281,17 +336,38 @@ def process_single_tile(model, x_tile: torch.Tensor, y_tile: torch.Tensor,
                        device: torch.device, src: str,
                        adj_index: int, coords: TileCoordinates,
                        processor: 'TileProcessor') -> Dict[str, np.ndarray]:
-    """Process a single tile and return the results."""
+    """Process a single tile and return the results.
+    
+    Args:
+        model: The climate model
+        x_tile: Input tile tensor
+        y_tile: Ground truth tile tensor
+        in_variables: List of input variable names
+        out_variables: List of output variable names  
+        out_list: List of output variables for visualization
+        in_channel: Index of variable to visualize in input
+        out_channel: Index of variable to visualize in output
+        in_transform: Transformation for input data
+        out_transform: Transformation for output data
+        device: Compute device (GPU/CPU)
+        src: Data source name
+        adj_index: Adjusted index within the batch
+        coords: Tile coordinate mappings
+        processor: TileProcessor instance
+        
+    Returns:
+        Dictionary with processed input, prediction, ground_truth, and coordinates
+    """
     # Move to device and run inference
     x_tile = x_tile.to(device)
     pred = model.forward(x_tile, in_variables, out_variables)
     pred = clip_replace_constant(y_tile, pred, out_variables)
     
-    # Process input
-    xx = x_tile[adj_index]
-    temp = xx[in_channel]
-    temp = temp.repeat(len(out_list), 1, 1)
-    img = in_transform(temp)[out_channel].detach().cpu().numpy()
+    # Process input - extract single channel and expand to match output channels
+    xx = x_tile[adj_index]  # Get sample from batch
+    temp = xx[in_channel]  # Extract the variable channel to visualize
+    temp = temp.repeat(len(out_list), 1, 1)  # Repeat to match output dimensions
+    img = in_transform(temp)[out_channel].detach().cpu().numpy()  # Apply denormalization
     
     # Process prediction
     ppred = out_transform(pred.squeeze(0))
@@ -320,22 +396,29 @@ def process_single_tile(model, x_tile: torch.Tensor, y_tile: torch.Tensor,
 
 def adjust_coords_for_flip(coords: TileCoordinates, 
                           processor: 'TileProcessor') -> TileCoordinates:
-    """Adjust coordinates after image flip - matches original logic."""
-    # Based on original code logic for flipped images
-    # Input coordinates
-    yi2tp = processor.yinp // processor.div + (processor.top + processor.bottom) - coords.yi1t
-    yi1tp = processor.yinp // processor.div + (processor.top + processor.bottom) - coords.yi2t
+    """Adjust coordinates after vertical image flip.
+    
+    When images are flipped vertically (for ERA5, PRISM, DAYMET sources),
+    the tile coordinates need to be adjusted accordingly.
+    """
+    # Adjust input tile extraction coordinates after flip
+    # Calculate flipped y-coordinates for tile extraction
+    tile_height_with_overlap = processor.yinp // processor.div + (processor.top + processor.bottom)
+    yi2tp = tile_height_with_overlap - coords.yi1t
+    yi1tp = tile_height_with_overlap - coords.yi2t
     coords.yi1t = yi1tp
     coords.yi2t = yi2tp
     
+    # Calculate flipped y-coordinates for result placement
     yi2rp = processor.yinp - coords.yi1r
     yi1rp = processor.yinp - coords.yi2r
     coords.yi1r = yi1rp
     coords.yi2r = yi2rp
     
-    # Output coordinates
-    yo2tp = processor.yout // processor.div + (processor.top + processor.bottom) * processor.vmul - coords.yo1t
-    yo1tp = processor.yout // processor.div + (processor.top + processor.bottom) * processor.vmul - coords.yo2t
+    # Adjust output tile extraction coordinates after flip
+    output_tile_height_with_overlap = processor.yout // processor.div + (processor.top + processor.bottom) * processor.vmul
+    yo2tp = output_tile_height_with_overlap - coords.yo1t
+    yo1tp = output_tile_height_with_overlap - coords.yo2t
     coords.yo1t = yo1tp
     coords.yo2t = yo2tp
     
@@ -350,7 +433,19 @@ def adjust_coords_for_flip(coords: TileCoordinates,
 def stitch_tiles(tiles: List[Dict[str, Any]], 
                  processor: TileProcessor,
                  has_ground_truth: bool) -> Dict[str, np.ndarray]:
-    """Stitch tiles together into complete images."""
+    """Stitch tiles together into complete images.
+    
+    Takes processed tiles and places them in their correct positions
+    to reconstruct the full image, handling overlap regions.
+    
+    Args:
+        tiles: List of tile dictionaries with 'input', 'prediction', 'ground_truth', and 'coords'
+        processor: TileProcessor instance with image dimensions
+        has_ground_truth: Whether ground truth data is available
+        
+    Returns:
+        Dictionary with stitched 'input', 'prediction', and optionally 'ground_truth' arrays
+    """
     # Initialize output arrays
     inputs = np.zeros((processor.yinp, processor.xinp), dtype=np.float32)
     preds = np.zeros((processor.yout, processor.xout), dtype=np.float32)
@@ -386,11 +481,19 @@ def stitch_tiles(tiles: List[Dict[str, Any]],
 def save_visualization(images: Dict[str, np.ndarray], 
                       config: VisualizationConfig,
                       rank: int = 0) -> None:
-    """Save visualization images and numpy arrays."""
+    """Save visualization images and numpy arrays.
+    
+    Only rank 0 saves to avoid file conflicts in distributed setting.
+    
+    Args:
+        images: Dictionary with 'input', 'prediction', and optionally 'ground_truth' arrays
+        config: Visualization configuration
+        rank: Process rank in distributed setting
+    """
     if rank != 0:
-        return
+        return  # Only rank 0 saves files
         
-    # Save input
+    # Calculate min/max for consistent colormap scaling
     img_min = np.min(images['input'])
     img_max = np.max(images['input'])
     
@@ -426,7 +529,15 @@ def save_visualization(images: Dict[str, np.ndarray],
 
 
 def compute_metrics(prediction: np.ndarray, ground_truth: np.ndarray) -> Dict[str, float]:
-    """Compute evaluation metrics between prediction and ground truth."""
+    """Compute evaluation metrics between prediction and ground truth.
+    
+    Args:
+        prediction: Predicted image array
+        ground_truth: Ground truth image array
+        
+    Returns:
+        Dictionary with 'psnr' and 'ssim' metrics
+    """
     if ground_truth is None:
         return {}
         
@@ -454,9 +565,9 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,
     """Main visualization function with tiling support.
     
     Args:
-        mm: Model module
-        dm: Data module
-        dm_vis: Visualization data module
+        mm: Model module (climate model)
+        dm: Data module (handles data loading and transformations)
+        dm_vis: Visualization data module (test data loader)
         out_list: List of output variables
         in_transform: Input transformation
         out_transform: Output transformation
@@ -476,22 +587,24 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,
     if config is None:
         config = VisualizationConfig()
     
-    # Setup
+    # Setup visualization parameters
     lat, lon = dm.get_lat_lon()
-    extent = [lon.min(), lon.max(), lat.min(), lat.max()]
-    out_channel = dm.out_vars.index(variable)
-    in_channel = dm.in_vars.index(variable)
+    extent = [lon.min(), lon.max(), lat.min(), lat.max()]  # Geographic extent for plotting
+    out_channel = dm.out_vars.index(variable)  # Index of variable in output channels
+    in_channel = dm.in_vars.index(variable)    # Index of variable in input channels
     
-    # Calculate dimensions
-    yout = len(lat)
-    xout = len(lon)
+    # Calculate image dimensions based on data and model configuration
+    yout = len(lat)  # Output height from latitude points
+    xout = len(lon)  # Output width from longitude points
     
+    # When input and output directories are same, we need to scale output dimensions
     if dm.inp_root_dir == dm.out_root_dir:
         yout = yout * mm.superres_mag
         xout = xout * mm.superres_mag
     
-    yinp = yout // mm.superres_mag
-    xinp = xout // mm.superres_mag
+    # Input dimensions are always lower resolution
+    yinp = yout // mm.superres_mag  # Input height
+    xinp = xout // mm.superres_mag  # Input width
     
     # Initialize tile processor
     processor = TileProcessor(div, overlap, (yinp, xinp), (yout, xout), mm.superres_mag)
@@ -499,15 +612,17 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,
     # Load test sample
     x, y, adj_index, (in_variables, out_variables) = load_test_sample(dm_vis, index)
     
-    # Process tiles
+    # Process tiles in a grid pattern
     tiles = []
-    for vindex in range(div):
-        for hindex in range(div):
-            # Get tile coordinates
+    for vindex in range(div):  # Vertical tile index
+        for hindex in range(div):  # Horizontal tile index
+            # Get tile coordinates with overlap handling
             coords = processor.get_tile_coordinates(hindex, vindex)
             
-            # Extract tile data
+            # Extract tile data from full tensors
+            # x_tile: [batch, channels, height, width] for input
             x_tile = x[:, :, coords.yi1:coords.yi2, coords.xi1:coords.xi2]
+            # y_tile: Ground truth at higher resolution
             y_tile = y[:, :, coords.yo1:coords.yo2, coords.xo1:coords.xo2]
             
             # Process tile
@@ -522,7 +637,8 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,
             if config.verbose:
                 logger.info(f"Processed tile {vindex},{hindex}")
     
-    # Stitch tiles together
+    # Stitch processed tiles back into full images
+    # Ground truth exists when input and output directories differ
     has_ground_truth = dm.inp_root_dir != dm.out_root_dir
     images = stitch_tiles(tiles, processor, has_ground_truth)
     
@@ -543,17 +659,21 @@ def visualize_at_index(mm, dm, dm_vis, out_list, in_transform, out_transform,
             logger.info(f"Metrics - PSNR: {metrics['psnr']:.4f}, SSIM: {metrics['ssim']:.4f}")
             print(f"Goodness of fit: PSNR {metrics['psnr']:.6f}, SSIM {metrics['ssim']:.6f}")
     
-    # For backward compatibility - print basic info
+    # Print shape info for backward compatibility with original code
     if dist.get_rank() == 0:
         print(f"img.shape {images['input'].shape}, min {images['input'].min()}, max {images['input'].max()}")
         print(f"ppred.shape {images['prediction'].shape}, min {images['prediction'].min()}, max {images['prediction'].max()}")
     
-    return None  # For compatibility with existing code
+    return None  # Returns None to match original API
 
 
-# Backward compatibility - keep old function names
+# Backward compatibility functions - maintain API compatibility with original code
 def visualize_sample(img, extent, title, vmin=-1, vmax=-1):
-    """Legacy visualization function for single sample."""
+    """Legacy visualization function for single sample.
+    
+    Displays a single image with geographic extent and colorbar.
+    Used by other parts of the codebase that expect this interface.
+    """
     fig, ax = plt.subplots()
     ax.set_title(title)
     ax.set_xlabel("Longitude")
@@ -573,7 +693,11 @@ def visualize_sample(img, extent, title, vmin=-1, vmax=-1):
 
 
 def visualize_mean_bias(dm, mm, out_transform, variable, src):
-    """Visualize mean bias between predictions and observations."""
+    """Visualize mean bias between predictions and observations.
+    
+    Computes the average prediction-observation difference across
+    the test dataset and displays it as a heatmap.
+    """
     from tqdm import tqdm
     
     lat, lon = dm.get_lat_lon()
@@ -622,7 +746,11 @@ def visualize_mean_bias(dm, mm, out_transform, variable, src):
 
 # based on https://github.com/oliverangelil/rankhistogram/tree/master
 def rank_histogram(obs, ensemble, channel):
-    """Create rank histogram for ensemble predictions."""
+    """Create rank histogram for ensemble predictions.
+    
+    Evaluates ensemble forecast reliability by checking if observations
+    fall uniformly within ensemble member rankings.
+    """
     obs = obs.numpy()[:, channel]
     ensemble = ensemble.numpy()[:, :, channel]
     combined = np.vstack((obs[np.newaxis], ensemble))

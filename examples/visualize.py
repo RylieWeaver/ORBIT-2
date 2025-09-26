@@ -229,7 +229,10 @@ def main():
     buffer_size = conf["trainer"]["buffer_size"]
     pretrain_path = conf["trainer"]["pretrain"]
     # Use command line override if provided, otherwise use config value
-    data_type = args.data_type or conf["trainer"].get("data_type", "float32")
+    # Force float32 for visualization to avoid numpy conversion issues with bfloat16
+    data_type = args.data_type or "float32"
+    if world_rank == 0 and conf["trainer"].get("data_type") == "bfloat16":
+        print("Note: Forcing float32 for visualization (bfloat16 not supported for numpy conversion)", flush=True)
 
     # Load tiling configuration for TILES algorithm
     try:

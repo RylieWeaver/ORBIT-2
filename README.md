@@ -90,58 +90,58 @@ The size the dataloader buffer is to reach before batches are served to the trai
 - `num_workers`: Int.
 Number of data loader workers.
 
-- data_type: Str (float32, bfloat16).
+- `data_type`: Str (float32, bfloat16).
 Data type to be used during training.
 
-- gpu_type: Str (amd, nvidia).
+- `gpu_type`: Str (amd, nvidia).
 Type of GPU being use for training.
 
-- train_loss: Str (various options avaiable check `src/climate_learn/metrics`).
+- `train_loss`: Str (various options avaiable check `src/climate_learn/metrics`).
 Loss function to use during training.
 
-- fsdp: Int.
+- `fsdp`: Int.
 Number of Fully Sharded Data Parallel ranks to use, for sharding model states.
 
-- simple_ddp: Int.
+- `simple_ddp`: Int.
 Number of Data Parallel ranks to use, for distributing different data to ranks.
 
-- tensor_par: Int.
+- `tensor_par`: Int.
 Number of Tensor Parallel ranks to use, for distributing tensor across multiple ranks.
 
-- do_tiling: Bool.
+- `do_tiling`: Bool.
 Whether to perform tiling of the input data.
 
-- div: Int.
+- `div`: Int.
 Number of tiles to divide the x and y dimensions of the data into, e.g if data is (180,90) and div=2, each image is split into 2x2=4 (90,45) tiles.
 
-- overlap: Int. 
+- `overlap`: Int. 
 **To Do: Hong-Jun, define overlap**
 
-- preset: Str.
+- `preset`: Str.
 **To Do: Xiao, define or take out**
 
-- lr: Float.
+- `lr`: Float.
 Initial learning rate for the optimizer.
 
-- weight_decay: Float.
+- `weight_decay`: Float.
 Weight decay for the Adam optimizer.
 
-- beta_1,beta_2: Float.
+- `beta_1,beta_2`: Float.
 Beta coefficients for the Adam optimizer.
 
-- warmup_epochs: Int.
+- `warmup_epochs`: Int.
 Number of warmup epochs for learnining rate scheduler.
 
-- warmup_start_lr: Float.
+- `warmup_start_lr`: Float.
 Learning rate to use for warm up.
 
-- eta_min: Float.
+- `eta_min`: Float.
 Coefficient for linear warmup cosine annealing
 
-- supperres_mag: Int.
+- `supperres_mag`: Int.
 Scale to magnify the input data to, if supperres_mag=4 and data is (180,90) output will be (720,360).
 
-- cnn_ratio: Int.
+- `cnn_ratio`: Int.
 How to scale the size of the output for the convolutional neural network skip connection
 **To Do: Xiao, more detailed description**
 

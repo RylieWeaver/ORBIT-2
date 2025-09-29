@@ -169,13 +169,13 @@ Stochastic depth dropout rate for dropping random layers during training.
 - `drop_rate`: Float (0,1).
 Stochastic dropout rate for dropping random values from attention input in transformer computations.
 
-- 'low_res_dir': Dictionary of Str.
+- `low_res_dir`: Dictionary of Str.
 Dictionary with each entry containing folder locations for files corresponding to different dataset's low resolution data. 
 
-- 'high_res_dir': Dictionary of Str.
+- `high_res_dir`: Dictionary of Str.
 Dictionary with each entry containing folder locations for files corresponding to different dataset's high resolution data. 
 
-- 'spatial_resolution': Dictionary of Int. 
+- `spatial_resolution`: Dictionary of Int. 
 Dictionary with each entry containing spatial resolution information corresponding to the data used in `low_res_dir` 
 
 - `default_vars`: List[str].

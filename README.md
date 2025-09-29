@@ -61,7 +61,8 @@ pip install -e .
 **To Do: Hong-Jun, fill in here for frontier supercomputer example.
 
 ### DGX
-1. Modify your config file making sure that fsdp x simple_ddp x tensor_par_ranks = [NUM_GPUS]
+1. Modify your [CONFIG_FILE] making sure that fsdp x simple_ddp x tensor_par_ranks = [NUM_GPUS]
+- Several Example config files are available in the `configs` folder
 2. Set gpu_type to `nvidia` in your config file
 3. Enter the examples directory
 4. Run the the training script with `mpirun -n [NUM_GPUS] python -u intermediate_downscaling.py [CONFIG_FILE] MPI` 
@@ -69,7 +70,126 @@ pip install -e .
 
 
 ## Hyperparameter Configuration
-**To Do: Isaac, fill in here.Explain how to use configuration files for experiments.
+To run the examples in the previous section we use a YAML config file to encapsulate all of the different available options for the model and training. Below is a description of the different available options.
+
+- `max_epochs`: Int.
+Number of epochs to be done before the training script ends. 
+
+- `checkpoint`: Str.
+Checkpoint file to use for continued training of a model. Expects the same configuration setting as the previously trained model. Starts at the epoch where the previous model stopped training.
+
+- `pretrain`: Str.
+Checkpoint file to use as a pretrained state for the model. Use this when training configurations such as data_type and amount of GPUs is changed.
+
+- `batch_size`: Int.
+Per GPU batch size.
+
+- `buffer_size`: Int.
+The size the dataloader buffer is to reach before batches are served to the training loop.
+
+- `num_workers`: Int.
+Number of data loader workers.
+
+- data_type: Str (float32, bfloat16).
+Data type to be used during training.
+
+- gpu_type: Str (amd, nvidia).
+Type of GPU being use for training.
+
+- train_loss: Str (various options avaiable check `src/climate_learn/metrics`).
+Loss function to use during training.
+
+- fsdp: Int.
+Number of Fully Sharded Data Parallel ranks to use, for sharding model states.
+
+- simple_ddp: Int.
+Number of Data Parallel ranks to use, for distributing different data to ranks.
+
+- tensor_par: Int.
+Number of Tensor Parallel ranks to use, for distributing tensor across multiple ranks.
+
+- do_tiling: Bool.
+Whether to perform tiling of the input data.
+
+- div: Int.
+Number of tiles to divide the x and y dimensions of the data into, e.g if data is (180,90) and div=2, each image is split into 2x2=4 (90,45) tiles.
+
+- overlap: Int. 
+**To Do: Hong-Jun, define overlap**
+
+- preset: Str.
+**To Do: Xiao, define or take out**
+
+- lr: Float.
+Initial learning rate for the optimizer.
+
+- weight_decay: Float.
+Weight decay for the Adam optimizer.
+
+- beta_1,beta_2: Float.
+Beta coefficients for the Adam optimizer.
+
+- warmup_epochs: Int.
+Number of warmup epochs for learnining rate scheduler.
+
+- warmup_start_lr: Float.
+Learning rate to use for warm up.
+
+- eta_min: Float.
+Coefficient for linear warmup cosine annealing
+
+- supperres_mag: Int.
+Scale to magnify the input data to, if supperres_mag=4 and data is (180,90) output will be (720,360).
+
+- cnn_ratio: Int.
+How to scale the size of the output for the convolutional neural network skip connection
+**To Do: Xiao, more detailed description**
+
+- `patch_size`: Int.  
+Size of patches. Input data must be divisible by `patch_size`.
+
+- `embed_dim`: Int.  
+Embedding dimension for Transformer Inputs
+
+- `depth`: Int.
+Number of Transformer blocks.
+
+- `decoder_depth`: Int.
+Number of MLP blocks to use in the decoder.
+
+- `num_heads`: Int.  
+Number of heads in Multi-head Attention layer.
+
+- `mlp_ratio`: Int.
+Ratio of MLP hidden dimension to embedding dimension, used to set the dimension of the MLP (FeedForward) layer.
+
+- `drop_path_rate`: Float (0,1).
+Stochastic depth dropout rate for dropping random layers during training.
+
+- `drop_rate`: Float (0,1).
+Stochastic dropout rate for dropping random values from attention input in transformer computations.
+
+- 'low_res_dir': Dictionary of Str.
+Dictionary with each entry containing folder locations for files corresponding to different dataset's low resolution data. 
+
+- 'high_res_dir': Dictionary of Str.
+Dictionary with each entry containing folder locations for files corresponding to different dataset's high resolution data. 
+
+- 'spatial_resolution': Dictionary of Int. 
+Dictionary with each entry containing spatial resolution information corresponding to the data used in `low_res_dir` 
+
+- `default_vars`: List[str].
+List of different potential modalities to be used as input. This list contains the available input channels.
+
+- `dict_in_variables`: Dictionary of Lists of Str.
+Variables corresponding to the different channels used as input data for the model training.
+
+- `dict_out_variables`: Dictionary of Lists of Str.
+Variables corresponding to the different channels in the output dataset that will be used as targets from the high resolution dataset for model prediction.
+
+- `var_weights`: Dictionary of Float
+**To Do: Xiao, more detailed description**
+
 
 ## Pretrained and Fine-Tuned Model Checkpoints
 **To Do: Jong-Youl, can you upload the checkpoints and include the path here.**

@@ -72,31 +72,12 @@ Choose an appropriate configuration file from `configs/`:
 - `interm_1b.yaml`: 1B parameter model
 - `interm_10b.yaml`: 10B parameter model (requires more nodes)
 
-Key parameters to modify:
+**Important:** Before running, review and modify the config file for your needs. See the [Hyperparameter Configuration](#hyperparameter-configuration) section below for detailed explanations of all parameters.
 
-**Training Configuration:**
-```yaml
-trainer:
-  max_epochs: 100      # Training epochs
-  batch_size: 32       # Batch size per GPU
-  data_type: bfloat16  # Use bfloat16 for memory efficiency
-  train_loss: "bayesian_tv"  # Loss function: 'mse', 'bayesian_tv', 'perceptual'
-
-parallelism:
-  fsdp: 4              # Fully Sharded Data Parallel
-  tensor_par: 1        # Tensor parallelism
-  seq_par: 1           # Sequence parallelism
-
-# TILES: Tile-wise sequence scaling algorithm
-tiling:
-  do_tiling: False     # Enable TILES for processing very large images/sequences
-  div: 4               # Division factor: splits image into div×div tiles
-                       # div=2 → 4 tiles (2×2), div=4 → 16 tiles (4×4)
-  overlap: 3           # Number of pixel rows/columns to overlap between adjacent tiles
-                       # Important: Total tile size must be divisible by patch_size
-                       # If not, you'll get an error asking to adjust overlap
-                       # Error message will tell you how many pixels to add
-```
+Key settings for Frontier:
+- Set `gpu_type: "amd"` under `trainer` section
+- Ensure `fsdp × simple_ddp × tensor_par_ranks = total_GPUs`
+- For TILES algorithm, enable `do_tiling: True` in `tiling` section for very large images
 
 #### Step 2: Submit Training Job
 First, edit `launch_intermediate.sh` to update:

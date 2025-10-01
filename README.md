@@ -1,6 +1,12 @@
 # ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling
-<p align="center"> <img src="docs/figs/example_downscale.png" width="540px"> </p> 
-<p align="center"> <img src="docs/figs/example_downscale2.png" width="640px"> </p>
+
+<div align="center">
+  <img src="docs/figs/example_downscale.png" width="540px">
+</div>
+
+<div align="center">
+  <img src="docs/figs/example_downscale2.png" width="640px">
+</div>
 
 This repository contains code accompanying the paper [**ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling**](https://arxiv.org/pdf/2505.04802).
 
@@ -16,19 +22,18 @@ Conventional downscaling methods, such as dynamical approaches (nested climate m
 ## Reslim Architecture
 Reslim is a vision transformer (ViT) architecture that operates and trains directly on adaptively compressed spatial inputs, significantly reducing sequence length while preserving critical information. It preserves accuracy and reduces uncertainty through a lightweight residual learning architecture, enabling efficient, low-overhead predictions.
 
-
-<p align="center">
+<div align="center">
   <img src="docs/figs/reslim.png" width="640px">
-</p>
+</div>
 
 
 
 ## TILES Sequence Scaling Algorithm
-TILES is a ViT training algorithm that reduces ViT’s self-attention complexity from quadratic to linear. It works by dividing images into overlapping tiles, each processed in parallel on separate Graphical Process Units (GPUs) using localized self-attention. Each tile’s downscaled outputs are then seamlessly merged to the full image.
+TILES is a ViT training algorithm that reduces ViT's self-attention complexity from quadratic to linear. It works by dividing images into overlapping tiles, each processed in parallel on separate Graphical Process Units (GPUs) using localized self-attention. Each tile's downscaled outputs are then seamlessly merged to the full image.
 
-<p align="center">
+<div align="center">
   <img src="docs/figs/TILES.png" width="400px">
-</p>
+</div>
 
 
 ## Installation
@@ -311,9 +316,9 @@ See Table 1 of the orbit-2 paper at [ORBIT-2 Paper on arXiv](https://arxiv.org/p
 ## Performance
 ### Strong Scaling on Frontier
 
-<p align="center">
+<div align="center">
   <img src="docs/figs/strong_scaling.png" width="640px">
-</p>
+</div>
 
 ### Maximum Sequence Length Scaling
 
@@ -324,9 +329,10 @@ A key advantage of AI foundation models is their efficiency at inference. Once t
 
 ### Climate Analysis
 ORBIT-2 achieves high-fidelity precipitation downscaling (1998–2021) across 58 IPCC climate regions. Key metrics include R² correlation, SSIM, monsoon onset/withdrawal timing, precipitation seasonality, entropy, and Hovmöller diagnostics. The figure on the left shows ERA5 at 28 km resolution, exhibiting moderate skill scores across metrics and regions, whereas ORBIT-2 7 km downscaling (figure on the right) consistently achieves much higher skill scores across all metrics and monsoon regions. These results highlight the effectiveness of ORBIT-2 in enhancing the spatiotemporal fidelity of precipitation, especially in regions governed by complex climatic processes.
-<p align="center"
+
+<div align="center">
   <img src="docs/figs/climate_analysis.png" width="640px">
-</p>
+</div>
 
 
 

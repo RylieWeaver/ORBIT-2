@@ -821,6 +821,7 @@ def main(device):
     num_workers = conf["trainer"]["num_workers"]
     buffer_size = conf["trainer"]["buffer_size"]
     data_type = conf["trainer"]["data_type"]
+    gpu_type = conf["trainer"]["gpu_type"]
     train_loss_str = conf["trainer"]["train_loss"]
     pretrain_path = conf["trainer"]["pretrain"]
 
@@ -917,8 +918,11 @@ def main(device):
         num_heads=num_heads,
     )
 
-    if data_type == "bfloat16":
-        FusedAttn_option = FusedAttn.CK
+    if gpu_type == "amd":
+        if data_type == "bfloat16":
+            FusedAttn_option = FusedAttn.CK
+        else:
+            FusedAttn_option = FusedAttn.DEFAULT
     else:
         FusedAttn_option = FusedAttn.DEFAULT
 

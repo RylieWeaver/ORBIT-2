@@ -24,13 +24,7 @@ Reslim is a vision transformer (ViT) architecture that operates and trains direc
 
 
 ## TILES Sequence Scaling Algorithm
-TILES is a ViT training algorithm that reduces ViT’s self-attention complexity from quadratic to linear. It works by dividing images into overlapping tiles, each processed in parallel on separate GPUs using localized self-attention. Each tile’s downscaled outputs are then seamlessly merged to the full image.
-
-Key features:
-- **Tile Division**: Images are split into div×div tiles (e.g., div=4 creates 16 tiles)
-- **Overlapping Regions**: Adjacent tiles share overlap pixel rows/columns to ensure continuity
-- **Patch Size Compatibility**: Tile dimensions must be divisible by the transformer's patch_size
-- **Linear Complexity**: Enables processing of sequences up to 4.2 billion tokens
+TILES is a ViT training algorithm that reduces ViT’s self-attention complexity from quadratic to linear. It works by dividing images into overlapping tiles, each processed in parallel on separate Graphical Process Units (GPUs) using localized self-attention. Each tile’s downscaled outputs are then seamlessly merged to the full image.
 
 <p align="center">
   <img src="docs/figs/TILES.png" width="400px">
@@ -38,21 +32,37 @@ Key features:
 
 
 ## Installation
-**To Do: Isaac, please fill in here. Provide clear installation instructions. Specify all dependencies (requirements.txt or equivalent).
+In order to run the code, we provide the instructions below for creating a conda environment with the necessary packages. Follow the instructions according to the respective GPU type (AMD or NVIDIA) that you will be utilizing.
 
-(1) Install your conda environment
-(2) Then do pip install -e . to install the package to the environment
-(3) Do  pip install -r requirements.txt
+### Frontier (Systems with AMD GPUs)
+```
+conda create -n orbit python=3.11 -y
+conda activate orbit
+pip install torch==2.8.0+rocm6.4 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/rocm6.4
+pip install -U xformers==0.0.32 --index-url https://download.pytorch.org/whl/rocm6.4
+MPICC="cc -shared" pip install --no-cache-dir --no-binary=mpi4py mpi4py
+pip install -e .
+```
+
+### DGX (System with NVIDIA GPUs)
+```
+conda create -n orbit python=3.11 -y
+conda activate orbit
+pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu129
+pip3 install -U xformers==0.0.32 --index-url https://download.pytorch.org/whl/cu129
+conda install -c conda-forge mpi4py mpich
+pip install -e .
+
+```
 
 
 
 ## Tutorial Example
 
-### Running on Frontier Supercomputer
-
+### Frontier
 #### Prerequisites
 - Access to Frontier supercomputer at ORNL
-- Allocated compute hours (replace 'lrn036' with your project allocation)
+- Allocated compute hours
 - Conda environment setup (see Installation section above)
 
 #### Step 1: Configure Your Experiment
@@ -63,62 +73,6 @@ Choose an appropriate configuration file from `configs/`:
 - `interm_10b.yaml`: 10B parameter model (requires more nodes)
 
 Key parameters to modify:
-
-**Model Configuration:**
-```yaml
-model:
-  preset: res_slimvit  # Model architecture: 'res_slimvit' (ORBIT-2) or 'vit' (standard ViT)
-  lr: 2e-3             # Learning rate
-  superres_mag: 4      # Super-resolution magnification factor
-  patch_size: 2        # Patch size for vision transformer
-  embed_dim: 256       # Embedding dimension (increase for larger models)
-  depth: 6             # Number of transformer blocks
-  decoder_depth: 4     # Number of decoder layers
-  num_heads: 4         # Number of attention heads
-```
-
-**Data Configuration:**
-```yaml
-data:
-  # Select datasets by uncommenting desired options
-  low_res_dir: {
-    # ERA5 global reanalysis data
-    #'ERA5_1': "/path/to/era5/5.625_deg/",  # ~625km resolution
-    #'ERA5_2': "/path/to/era5/1.0_deg/",    # ~111km resolution
-    
-    # PRISM regional climate data (CONUS)
-    'PRISM': "/path/to/prism/10.0_arcmin",   # ~18km resolution
-    
-    # DAYMET regional climate data (North America)
-    #'DAYMET_1': "/path/to/daymet/10.0_arcmin",  # ~18km resolution
-    #'DAYMET_2': "/path/to/daymet/2.0_arcmin",   # ~4km resolution
-  }
-  
-  high_res_dir: {
-    # Target high-resolution data
-    #'ERA5_1': "/path/to/era5/1.40625_deg/",     # ~156km resolution
-    #'ERA5_2': "/path/to/era5/0.25_deg/",        # ~28km resolution
-    'PRISM': "/path/to/prism/2.5_arcmin",        # ~4.5km resolution
-    #'DAYMET_1': "/path/to/daymet/2.5_arcmin",   # ~4.5km resolution
-    #'DAYMET_2': "/path/to/daymet/0.5_arcmin",   # ~0.9km resolution
-  }
-
-  # Variables to use for training (modify based on dataset)
-  dict_out_variables: {
-    'PRISM': [
-      "total_precipitation_24hr",  # Daily precipitation
-      "2m_temperature_min",        # Daily minimum temperature
-      "2m_temperature_max",        # Daily maximum temperature
-    ],
-    'ERA5_1': [
-      "total_precipitation_24hr",
-      "2m_temperature_min",
-      "2m_temperature_max",
-      #"10m_u_component_of_wind",  # Uncomment for wind variables
-      #"10m_v_component_of_wind",
-    ],
-  }
-```
 
 **Training Configuration:**
 ```yaml
@@ -146,7 +100,7 @@ tiling:
 
 #### Step 2: Submit Training Job
 First, edit `launch_intermediate.sh` to update:
-- `#SBATCH -A lrn036` → your project allocation
+- `#SBATCH -A` → your project allocation
 - `conda activate` path → your conda environment
 - `../configs/interm_8m.yaml` → your chosen config file (e.g., `interm_117m.yaml`, `interm_1b.yaml`)
 
@@ -171,9 +125,15 @@ squeue -u $USER
 tail -f flash-{JOBID}.out
 ```
 
+Key log indicators:
+- Epoch progress and loss values
+- GPU memory usage per rank
+- Training throughput (samples/sec)
+- Checkpoint save confirmations
+
 #### Step 4: Visualize Results
 After training completes or reaches a checkpoint, edit `launch_visualize.sh` to update:
-- `#SBATCH -A lrn036` → your project allocation
+- `#SBATCH -A` → your project allocation
 - `conda activate` path → your conda environment
 - `../configs/interm_8m_ft.yaml` → your config file
 
@@ -202,42 +162,138 @@ This will generate visualization outputs for:
 - Comparison metrics
 
 Additional visualization options:
-- `--index N`: Visualize test sample at index N (default: 0)
-- `--variable VAR`: Variable to visualize (default: total_precipitation_24hr)
 - `--checkpoint PATH`: Override checkpoint path from config file
 
-#### Example Output
-Training on 1 node (8 GPUs) with the 8M model typically:
-- Processes ~400 samples per epoch
-- Achieves ~X samples/second throughput
-- Reaches R² > 0.98 after ~50 epochs
+### DGX
+1. Modify your [CONFIG_FILE] making sure that fsdp x simple_ddp x tensor_par_ranks = [NUM_GPUS]
+- Several Example config files are available in the `configs` folder
+2. Set gpu_type to `nvidia` in your config file
+3. Enter the examples directory
+4. Run the the training script with `mpirun -n [NUM_GPUS] python -u intermediate_downscaling.py [CONFIG_FILE] MPI` 
 
-#### Scaling to Multiple Nodes
-For larger models or datasets, modify the SLURM parameters:
-```bash
-#SBATCH --nodes=8          # Use 8 nodes (64 GPUs)
-#SBATCH -t 02:00:00        # Extend time limit
-```
-
-And enable advanced parallelism in config:
-```yaml
-parallelism:
-  fsdp: 8
-  tensor_par: 2
-  seq_par: 2
-```
-
-#### Troubleshooting
-- If encountering OOM errors, reduce `batch_size` or enable gradient checkpointing
-- For network issues, check the NCCL environment variables
-- Ensure DDStore is properly configured for checkpointing
-
-### Running on DGX Systems
-**To Do: Isaac, fill in here for the DGX box example. 
 
 
 ## Hyperparameter Configuration
-**To Do: Isaac, fill in here.Explain how to use configuration files for experiments.
+To run the examples in the previous section we use a YAML config file to encapsulate all of the different available options for the model and training. Below is a description of the different available options.
+
+- `max_epochs`: Int.
+Number of epochs to be done before the training script ends. 
+
+- `checkpoint`: Str.
+Checkpoint file to use for continued training of a model. Expects the same configuration setting as the previously trained model. Starts at the epoch where the previous model stopped training.
+
+- `pretrain`: Str.
+Checkpoint file to use as a pretrained state for the model. Use this when training configurations such as data_type and amount of GPUs is changed.
+
+- `batch_size`: Int.
+Per GPU batch size.
+
+- `buffer_size`: Int.
+The size the dataloader buffer is to reach before batches are served to the training loop.
+
+- `num_workers`: Int.
+Number of data loader workers.
+
+- `data_type`: Str (float32, bfloat16).
+Data type to be used during training.
+
+- `gpu_type`: Str (amd, nvidia).
+Type of GPU being use for training.
+
+- `train_loss`: Str (various options avaiable check `src/climate_learn/metrics`).
+Loss function to use during training.
+
+- `fsdp`: Int.
+Number of Fully Sharded Data Parallel ranks to use, for sharding model states.
+
+- `simple_ddp`: Int.
+Number of Data Parallel ranks to use, for distributing different data to ranks.
+
+- `tensor_par`: Int.
+Number of Tensor Parallel ranks to use, for distributing tensor across multiple ranks.
+
+- `do_tiling`: Bool.
+Whether to perform tiling of the input data.
+
+- `div`: Int.
+Number of tiles to divide the x and y dimensions of the data into, e.g if data is (180,90) and div=2, each image is split into 2x2=4 (90,45) tiles.
+
+- `overlap`: Int.
+Number of pixel rows/columns to overlap between adjacent tiles in the TILES algorithm. Overlap regions ensure smooth reconstruction when tiles are stitched back together. Note: Due to the 2:1 aspect ratio of climate data (longitude:latitude), the actual horizontal overlap is 2x the vertical overlap
+
+- `preset`: Str.
+**To Do: Xiao, define or take out**
+
+- `lr`: Float.
+Initial learning rate for the optimizer.
+
+- `weight_decay`: Float.
+Weight decay for the Adam optimizer.
+
+- `beta_1,beta_2`: Float.
+Beta coefficients for the Adam optimizer.
+
+- `warmup_epochs`: Int.
+Number of warmup epochs for learnining rate scheduler.
+
+- `warmup_start_lr`: Float.
+Learning rate to use for warm up.
+
+- `eta_min`: Float.
+Coefficient for linear warmup cosine annealing
+
+- `supperres_mag`: Int.
+Scale to magnify the input data to, if supperres_mag=4 and data is (180,90) output will be (720,360).
+
+- `cnn_ratio`: Int.
+How to scale the size of the output for the convolutional neural network skip connection
+**To Do: Xiao, more detailed description**
+
+- `patch_size`: Int.  
+Size of patches. Input data must be divisible by `patch_size`.
+
+- `embed_dim`: Int.  
+Embedding dimension for Transformer Inputs
+
+- `depth`: Int.
+Number of Transformer blocks.
+
+- `decoder_depth`: Int.
+Number of MLP blocks to use in the decoder.
+
+- `num_heads`: Int.  
+Number of heads in Multi-head Attention layer.
+
+- `mlp_ratio`: Int.
+Ratio of MLP hidden dimension to embedding dimension, used to set the dimension of the MLP (FeedForward) layer.
+
+- `drop_path_rate`: Float (0,1).
+Stochastic depth dropout rate for dropping random layers during training.
+
+- `drop_rate`: Float (0,1).
+Stochastic dropout rate for dropping random values from attention input in transformer computations.
+
+- `low_res_dir`: Dictionary of Str.
+Dictionary with each entry containing folder locations for files corresponding to different dataset's low resolution data. 
+
+- `high_res_dir`: Dictionary of Str.
+Dictionary with each entry containing folder locations for files corresponding to different dataset's high resolution data. 
+
+- `spatial_resolution`: Dictionary of Int. 
+Dictionary with each entry containing spatial resolution information corresponding to the data used in `low_res_dir` 
+
+- `default_vars`: List[str].
+List of different potential modalities to be used as input. This list contains the available input channels.
+
+- `dict_in_variables`: Dictionary of Lists of Str.
+Variables corresponding to the different channels used as input data for the model training.
+
+- `dict_out_variables`: Dictionary of Lists of Str.
+Variables corresponding to the different channels in the output dataset that will be used as targets from the high resolution dataset for model prediction.
+
+- `var_weights`: Dictionary of Float
+**To Do: Xiao, more detailed description**
+
 
 ## Pretrained and Fine-Tuned Model Checkpoints
 **To Do: Jong-Youl, can you upload the checkpoints and include the path here.**

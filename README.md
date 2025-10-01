@@ -75,9 +75,34 @@ Choose an appropriate configuration file from `configs/`:
 **Important:** Before running, review and modify the config file for your needs. See the [Hyperparameter Configuration](#hyperparameter-configuration) section below for detailed explanations of all parameters.
 
 Key settings for Frontier:
-- Set `gpu_type: "amd"` under `trainer` section
-- Ensure `fsdp × simple_ddp × tensor_par_ranks = total_GPUs`
-- For TILES algorithm, enable `do_tiling: True` in `tiling` section for very large images
+
+**GPU Configuration:**
+```yaml
+trainer:
+  gpu_type: "amd"      # AMD GPUs on Frontier
+```
+
+**Parallelism Configuration:**
+```yaml
+parallelism:
+  fsdp: 4              # Fully Sharded Data Parallel
+  simple_ddp: 4        # Data Parallel
+  tensor_par: 1        # Tensor parallelism
+  seq_par: 1           # Sequence parallelism
+# Note: fsdp × simple_ddp × tensor_par_ranks should equal total number of GPUs
+```
+
+**TILES Configuration (for very large images):**
+```yaml
+tiling:
+  do_tiling: False     # Enable TILES for processing very large images/sequences
+  div: 4               # Division factor: splits image into div×div tiles
+                       # div=2 → 4 tiles (2×2), div=4 → 16 tiles (4×4)
+  overlap: 3           # Number of pixel rows/columns to overlap between adjacent tiles
+                       # Overlap ensures smooth reconstruction when stitching tiles
+                       # Important: Total tile size must be divisible by patch_size
+                       # If not, you'll get an error asking to adjust overlap
+```
 
 #### Step 2: Submit Training Job
 First, edit `launch_intermediate.sh` to update:

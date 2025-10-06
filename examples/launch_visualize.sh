@@ -75,9 +75,15 @@ export ORBIT_USE_DDSTORE=0 ## 1 (enabled) or 0 (disable)
 
 export LD_PRELOAD=/lib64/libgcc_s.so.1:/usr/lib64/libstdc++.so.6
 
+# Visualization command examples:
+# 1. Use checkpoint path from config file (default):
+# time srun -n $((SLURM_JOB_NUM_NODES*8)) python ./visualize.py ../configs/interm_8m_ft.yaml
 
+# 2. Override with custom checkpoint path:
+# time srun -n $((SLURM_JOB_NUM_NODES*8)) python ./visualize.py ../configs/interm_8m_ft.yaml --checkpoint /path/to/custom/checkpoint.ckpt
 
-
+# 3. With additional options (index, variable, etc.):
+# time srun -n $((SLURM_JOB_NUM_NODES*8)) python ./visualize.py ../configs/interm_8m_ft.yaml --checkpoint /path/to/custom/checkpoint.ckpt --index 10 --variable 2m_temperature_max
 
 time srun -n $((SLURM_JOB_NUM_NODES*8)) python ./visualize.py ../configs/interm_8m_ft.yaml
 

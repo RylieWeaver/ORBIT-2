@@ -26,9 +26,40 @@ from .precipmodule import LogTransform
 from climate_learn.dist.distdataset import *
 
 
+def calculate_tile_overlap(overlap):
+    """Calculate tile overlap for horizontal and vertical dimensions.
+
+    Args:
+        overlap: Base overlap size
+
+    Returns:
+        tuple: (left, right, top, bottom) overlap sizes
+
+    Note:
+        Horizontal overlap is 2x vertical due to 2:1 aspect ratio of climate data (lon:lat)
+    """
+    if overlap % 2 == 0:
+        # Even overlap: symmetric padding
+        top = bottom = overlap // 2
+        left = right = overlap // 2 * 2  # 2x for longitude dimension
+    else:
+        # Odd overlap: asymmetric padding
+        left = overlap // 2 * 2  # 2x for longitude dimension
+        right = (overlap // 2 + 1) * 2  # 2x for longitude dimension
+        top = overlap // 2
+        bottom = overlap // 2 + 1
+    return left, right, top, bottom
+
+
 class IterDataModule(torch.nn.Module):
     """ClimateLearn's iter data module interface. Encapsulates dataset/task-specific
-    data modules."""
+    data modules.
+
+    This module supports the TILES algorithm for processing large climate images by:
+    1. Dividing images into smaller tiles for memory-efficient processing
+    2. Adding overlap regions between tiles to ensure smooth stitching
+    3. Maintaining the 2:1 aspect ratio inherent in lat/lon climate data
+    """
 
     def __init__(
         self,
@@ -51,8 +82,8 @@ class IterDataModule(torch.nn.Module):
         batch_size=64,
         num_workers=0,
         pin_memory=False,
-        div=1,
-        overlap=4,
+        div=1,  # TILES: number of divisions per dimension (div x div tiles)
+        overlap=4,  # TILES: overlap size between adjacent tiles
     ):
         super().__init__()
         self.task = task
@@ -159,42 +190,37 @@ class IterDataModule(torch.nn.Module):
             out_size = torch.Size([self.batch_size, len(out_vars), out_lat, out_lon])
 
         elif self.task == "downscaling":
-            if self.overlap % 2 == 0:
-                top = bottom = self.overlap // 2
-                left = right = self.overlap // 2 * 2
-            else:
-                left = self.overlap // 2 * 2
-                right = ( self.overlap // 2 + 1 ) * 2
-                top = self.overlap // 2
-                bottom = self.overlap // 2 + 1
-
-            #hoverlap = self.overlap * 2
-            #voverlap = self.overlap
+            # Calculate overlap sizes for TILES algorithm
+            left, right, top, bottom = calculate_tile_overlap(self.overlap)
+            # Calculate input tile dimensions with overlap
             if self.div == 1:
-                wid = in_lon
+                # No tiling: use full image dimensions
+                tile_width_in = in_lon
+                tile_height_in = in_lat
             else:
-                wid = in_lon // self.div + left + right
-            if self.div == 1:
-                hgt = in_lat
-            else:
-                hgt = in_lat // self.div + top + bottom
+                # With tiling: add overlap to tile dimensions
+                tile_width_in = in_lon // self.div + left + right
+                tile_height_in = in_lat // self.div + top + bottom
             in_size = torch.Size(
-                [self.batch_size, len(self.in_vars), hgt, wid]
+                [self.batch_size, len(self.in_vars), tile_height_in, tile_width_in]
             )
             ##TODO: change out size
             out_vars = copy.deepcopy(self.out_vars)
             if "2m_temperature_extreme_mask" in out_vars:
                 out_vars.remove("2m_temperature_extreme_mask")
+            # Calculate output tile dimensions with scaled overlap
             if self.div == 1:
-                wid = out_lon
+                # No tiling: use full image dimensions
+                tile_width_out = out_lon
+                tile_height_out = out_lat
             else:
-                wid = out_lon // self.div + ( left + right ) * (out_lon//in_lon)
-            if self.div == 1:
-                hgt = out_lat
-            else:
-                hgt = out_lat // self.div + ( top + bottom ) * (out_lat//in_lat)
+                # Scale overlap by resolution ratio
+                scale_x = out_lon // in_lon
+                scale_y = out_lat // in_lat
+                tile_width_out = out_lon // self.div + (left + right) * scale_x
+                tile_height_out = out_lat // self.div + (top + bottom) * scale_y
             out_size = torch.Size(
-                [self.batch_size, len(out_vars), hgt, wid]
+                [self.batch_size, len(out_vars), tile_height_out, tile_width_out]
             )
 
         return in_size, out_size
@@ -205,11 +231,13 @@ class IterDataModule(torch.nn.Module):
         normed = OrderedDict()
         for var in variables:
             if var in PRECIP_VARIABLES:
-                normed[var] = LogTransform(m2mm=True, LOG1P=True, thres_mm_per_day=0.25) 
+                normed[var] = LogTransform(m2mm=True, LOG1P=True, thres_mm_per_day=0.25)
             else:
-                normed[var] = transforms.Normalize(normalize_mean[var][0], normalize_std[var][0])
+                normed[var] = transforms.Normalize(
+                    normalize_mean[var][0], normalize_std[var][0]
+                )
         return normed
- 
+
     def get_out_transforms(self):
         out_transforms = {}
         for key in self.output_transforms.keys():
@@ -243,8 +271,8 @@ class IterDataModule(torch.nn.Module):
                         out_file_list=self.out_lister_train,
                         variables=self.in_vars,
                         out_variables=self.out_vars,
-                        data_par_size = self.data_par_size,
-                        data_par_group = self.data_par_group,
+                        data_par_size=self.data_par_size,
+                        data_par_group=self.data_par_group,
                         shuffle=True,
                         div=self.div,
                         overlap=self.overlap,
@@ -263,8 +291,8 @@ class IterDataModule(torch.nn.Module):
                         out_file_list=self.out_lister_val,
                         variables=self.in_vars,
                         out_variables=self.out_vars,
-                        data_par_size = self.data_par_size,
-                        data_par_group = self.data_par_group,
+                        data_par_size=self.data_par_size,
+                        data_par_group=self.data_par_group,
                         shuffle=False,
                         div=self.div,
                         overlap=self.overlap,
@@ -283,8 +311,8 @@ class IterDataModule(torch.nn.Module):
                         out_file_list=self.out_lister_test,
                         variables=self.in_vars,
                         out_variables=self.out_vars,
-                        data_par_size = self.data_par_size,
-                        data_par_group = self.data_par_group,
+                        data_par_size=self.data_par_size,
+                        data_par_group=self.data_par_group,
                         shuffle=False,
                         div=self.div,
                         overlap=self.overlap,
@@ -307,8 +335,8 @@ class IterDataModule(torch.nn.Module):
                                 out_file_list=self.out_lister_train,
                                 variables=self.in_vars,
                                 out_variables=self.out_vars,
-                                data_par_size = self.data_par_size,
-                                data_par_group = self.data_par_group,
+                                data_par_size=self.data_par_size,
+                                data_par_group=self.data_par_group,
                                 shuffle=True,
                                 div=self.div,
                                 overlap=self.overlap,
@@ -329,8 +357,8 @@ class IterDataModule(torch.nn.Module):
                             out_file_list=self.out_lister_val,
                             variables=self.in_vars,
                             out_variables=self.out_vars,
-                            data_par_size = self.data_par_size,
-                            data_par_group = self.data_par_group,
+                            data_par_size=self.data_par_size,
+                            data_par_group=self.data_par_group,
                             shuffle=False,
                             div=self.div,
                             overlap=self.overlap,
@@ -349,8 +377,8 @@ class IterDataModule(torch.nn.Module):
                             out_file_list=self.out_lister_test,
                             variables=self.in_vars,
                             out_variables=self.out_vars,
-                            data_par_size = self.data_par_size,
-                            data_par_group = self.data_par_group,
+                            data_par_size=self.data_par_size,
+                            data_par_group=self.data_par_group,
                             shuffle=False,
                             div=self.div,
                             overlap=self.overlap,
@@ -369,8 +397,8 @@ class IterDataModule(torch.nn.Module):
                         out_file_list=self.out_lister_test,
                         variables=self.in_vars,
                         out_variables=self.out_vars,
-                        data_par_size = self.data_par_size,
-                        data_par_group = self.data_par_group,
+                        data_par_size=self.data_par_size,
+                        data_par_group=self.data_par_group,
                         shuffle=False,
                         div=self.div,
                         overlap=self.overlap,
@@ -398,13 +426,15 @@ class IterDataModule(torch.nn.Module):
             trainset = DistDataset(
                 self.data_train,
                 "trainset",
-                data_par_group = self.data_par_group,
-                )
+                data_par_group=self.data_par_group,
+            )
 
-            sampler = torch.utils.data.distributed.DistributedSampler(trainset, num_replicas=data_par_size, rank=data_group_rank, shuffle=True)
+            sampler = torch.utils.data.distributed.DistributedSampler(
+                trainset, num_replicas=data_par_size, rank=data_group_rank, shuffle=True
+            )
 
             train_loader = DDStoreDataLoader(
-            # train_loader = torch.utils.data.DataLoader(
+                # train_loader = torch.utils.data.DataLoader(
                 trainset.ddstore,
                 trainset,
                 batch_size=self.batch_size,

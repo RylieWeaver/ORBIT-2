@@ -7,9 +7,9 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import wrap, transformer_auto_wrap_policy
 import torch.distributed as dist
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-   checkpoint_wrapper,
-   CheckpointImpl,
-   apply_activation_checkpointing,
+    checkpoint_wrapper,
+    CheckpointImpl,
+    apply_activation_checkpointing,
 )
 from torch.distributed.fsdp import MixedPrecision
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
@@ -17,9 +17,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.nn import Sequential
 from datetime import timedelta
 import sys
-import random
 import time
-import numpy as np
 import yaml
 
 # Third party
@@ -27,92 +25,188 @@ import climate_learn as cl
 from climate_learn.data.processing.era5_constants import (
     PRESSURE_LEVEL_VARS,
     DEFAULT_PRESSURE_LEVELS,
-    CONSTANTS
+    CONSTANTS,
 )
 from climate_learn.models.hub.components.vit_blocks import Block
 from climate_learn.models.hub.components.cnn_blocks import (
     DownBlock,
     MiddleBlock,
     UpBlock,
-    ResidualBlock
+    ResidualBlock,
 )
 from climate_learn.utils.fused_attn import FusedAttn
 from climate_learn.models.hub.components.pos_embed import interpolate_pos_embed
+from climate_learn.dist.profile import *
+from utils import seed_everything, init_par_groups
 
 
-def load_checkpoint_pretrain(model, checkpoint_path, pretrain_path, cp_save_path, local_rank, tensor_par_size=1,tensor_par_group=None):
+def log_gpu_memory(device, message="", world_rank=None):
+    """Log GPU memory usage with optional message and rank."""
+    memory_gb = torch.cuda.memory_reserved(device) / 1024 / 1024 / 1024
+    if world_rank is not None:
+        print(
+            f"rank {world_rank} {message} torch.cuda.memory_reserved: {memory_gb:.2f}GB",
+            flush=True,
+        )
+    else:
+        print(f"{message} torch.cuda.memory_reserved: {memory_gb:.2f}GB", flush=True)
+
+
+def get_tensor_parallel_checkpoint_path(base_path, rank, tensor_par_size):
+    """Get checkpoint path for tensor parallel models."""
+    if tensor_par_size > 1:
+        return f"{base_path}_rank_{rank}"
+    return base_path
+
+
+def get_checkpoint_filename(save_path, epoch, world_rank, tensor_par_size):
+    """Generate checkpoint filename for given epoch and rank."""
+    base_filename = f"{save_path}/interm_epoch_{epoch}.ckpt"
+    if tensor_par_size > 1:
+        return f"{base_filename}_rank_{world_rank}"
+    return base_filename
+
+
+def load_checkpoint_pretrain(
+    model,
+    checkpoint_path,
+    pretrain_path,
+    cp_save_path,
+    tensor_par_size=1,
+    tensor_par_group=None,
+):
+    """
+    Load model weights from checkpoint or pretrained model.
+
+    This function handles three scenarios:
+    1. Resume training from a checkpoint (loads model, optimizer, scheduler states)
+    2. Initialize from a pretrained model (loads only model weights)
+    3. Initialize model for tensor parallelism when no checkpoint exists
+
+    Args:
+        model: PyTorch model to load weights into
+        checkpoint_path (str): Path to checkpoint file for resuming training
+        pretrain_path (str): Path to pretrained model weights
+        cp_save_path (str): Directory where checkpoints will be saved
+        tensor_par_size (int): Size of tensor parallelism (default: 1)
+        tensor_par_group: Process group for tensor parallelism (default: None)
+
+    Returns:
+        tuple: (model, start_epoch) where start_epoch is the epoch to resume from
+    """
     world_rank = dist.get_rank()
+    local_rank = int(os.environ["SLURM_LOCALID"])
 
-    #load model checkpoint
+    # load model checkpoint
     if checkpoint_path is not None and world_rank < tensor_par_size:
 
-        if tensor_par_size >1:
-            checkpoint_path = checkpoint_path+"_"+"rank"+"_"+str(world_rank) 
+        checkpoint_path = get_tensor_parallel_checkpoint_path(
+            checkpoint_path, world_rank, tensor_par_size
+        )
 
         if os.path.exists(checkpoint_path):
 
-            print("world_rank",world_rank,"model resume from checkpoint",checkpoint_path," Checkpoint path found.",flush=True)
+            print(
+                "world_rank",
+                world_rank,
+                "model resume from checkpoint",
+                checkpoint_path,
+                " Checkpoint path found.",
+                flush=True,
+            )
 
-            #map_location = 'cuda:'+str(device)
-            map_location = 'cpu'
+            map_location = "cpu"
 
-            checkpoint = torch.load(checkpoint_path,map_location=map_location)
-            model.load_state_dict(checkpoint['model_state_dict'])
+            checkpoint = torch.load(checkpoint_path, map_location=map_location)
+            model.load_state_dict(checkpoint["model_state_dict"])
 
             del checkpoint
         else:
-            print("resume from checkpoint was set to True. But the checkpoint path does not exist.",flush=True)
+            print(
+                "resume from checkpoint was set to True. "
+                "But the checkpoint path does not exist.",
+                flush=True,
+            )
             sys.exit("checkpoint path does not exist")
 
-    #load pretrained model
+    # load pretrained model
     if pretrain_path is not None and world_rank < tensor_par_size:
-        if tensor_par_size >1:
-            pretrain_path = pretrain_path+"_"+"rank"+"_"+str(world_rank)
+        if tensor_par_size > 1:
+            pretrain_path = pretrain_path + "_" + "rank" + "_" + str(world_rank)
 
         if os.path.exists(pretrain_path):
-            print("world_rank",world_rank,"load pretrained model",pretrain_path," Pretrain path found.",flush=True)
-            _load_pretrained_weights(model,pretrain_path,device,world_rank)  
+            print(
+                "world_rank",
+                world_rank,
+                "load pretrained model",
+                pretrain_path,
+                " Pretrain path found.",
+                flush=True,
+            )
+            _load_pretrained_weights(model, pretrain_path, local_rank, world_rank)
         else:
-            print("resume from pretrained model was set to True. But the pretrained model path does not exist.",flush=True)
+            print(
+                "resume from pretrained model was set to True. "
+                "But the pretrained model path does not exist.",
+                flush=True,
+            )
             sys.exit("pretrain path does not exist")
 
-    #initialize weights for tensor parallelism when training from scratch
+    # initialize weights for tensor parallelism when training from scratch
     if pretrain_path is None and checkpoint_path is None and tensor_par_size > 1:
-        if world_rank==0: 
+        if world_rank == 0:
             isExist = os.path.exists(cp_save_path)
-      
+
             if not isExist:
                 # Create a new directory because it does not exist
                 os.makedirs(cp_save_path)
-                print("The new checkpoint saving directory is created!")    
+                print("The new checkpoint saving directory is created!")
 
-            #save initialial model weights and distribute to all GPUs in the tensor parallel group to synchronize model weights that do not belong to the training block
+            # Save initial model weights and distribute to all GPUs in the tensor
+            # parallel group to synchronize model weights that do not belong to the
+            # training block
 
-            init_model_dict = {k: v for k, v in model.state_dict().items() if ('attn' not in  k and 'mlp' not in k and 'var_agg' not in k)}
+            init_model_dict = {
+                k: v
+                for k, v in model.state_dict().items()
+                if ("attn" not in k and "mlp" not in k and "var_agg" not in k)
+            }
 
-            print("training from scratch and tensor_par_size>1. rank",world_rank,"init_model_dict.keys()",init_model_dict.keys(),flush=True)
+            print(
+                "training from scratch and tensor_par_size>1. rank",
+                world_rank,
+                "init_model_dict.keys()",
+                init_model_dict.keys(),
+                flush=True,
+            )
 
-            torch.save(init_model_dict,
-                    cp_save_path+'/initial_'+str(dist.get_rank())+'.pth')
+            torch.save(
+                init_model_dict,
+                cp_save_path + "/initial_" + str(dist.get_rank()) + ".pth",
+            )
 
             del init_model_dict
 
-        dist.barrier(device_ids= [local_rank])
+        dist.barrier(device_ids=[local_rank])
 
-        if world_rank!=0 and world_rank <tensor_par_size:
+        if world_rank != 0 and world_rank < tensor_par_size:
 
-           #load initial model weights and synchronize model weights that are not in the trianing block among sequence parallel GPUs
-           print("training from scratch. rank",world_rank,flush=True)
+            # Load initial model weights and synchronize model weights that are not
+            # in the training block among sequence parallel GPUs
+            print("training from scratch. rank", world_rank, flush=True)
 
-           map_location = 'cpu'
-           #map_location = 'cuda:'+str(device)
-           model.load_state_dict(torch.load(cp_save_path+'/initial_'+str(0)+'.pth',map_location=map_location),strict=False)
+            map_location = "cpu"
+            model.load_state_dict(
+                torch.load(
+                    cp_save_path + "/initial_" + str(0) + ".pth",
+                    map_location=map_location,
+                ),
+                strict=False,
+            )
 
 
-
-def _load_pretrained_weights(model, pretrain_path, device,world_rank):
-    # map_location = 'cuda:'+str(device)
-    map_location = 'cpu'
+def _load_pretrained_weights(model, pretrain_path, device, world_rank):
+    map_location = "cpu"
     checkpoint = torch.load(pretrain_path, map_location=map_location)
 
     print("Loading pre-trained checkpoint from: %s" % pretrain_path)
@@ -120,29 +214,37 @@ def _load_pretrained_weights(model, pretrain_path, device,world_rank):
 
     del checkpoint
 
-
     state_dict = model.state_dict()
-  
-    if torch.distributed.get_rank()==0: 
+
+    if torch.distributed.get_rank() == 0:
         for k in list(pretrain_model.keys()):
-            print("Pretrained model before deletion. Name ",k,"shape",pretrain_model[k].shape,flush=True)
+            print(
+                "Pretrained model before deletion. Name ",
+                k,
+                "shape",
+                pretrain_model[k].shape,
+                flush=True,
+            )
 
-
-    # checkpoint_keys = list(pretrain_model.keys())
-    for k in list(pretrain_model.keys()):  #in pre-train model weights, but not fine-tuning model
+    for k in list(
+        pretrain_model.keys()
+    ):  # in pre-train model weights, but not fine-tuning model
         if k not in state_dict.keys():
             print(f"Removing key {k} from pretrained checkpoint: no exist")
             del pretrain_model[k]
-        elif pretrain_model[k].shape != state_dict[k].shape:  #if pre-train and fine-tune model weights dimension doesn't match
-            if k =="pos_embed":
-                print("interpolate positional embedding",flush=True)
+        elif (
+            pretrain_model[k].shape != state_dict[k].shape
+        ):  # if pre-train and fine-tune model weights dimension doesn't match
+            if k == "pos_embed":
+                print("interpolate positional embedding", flush=True)
                 interpolate_pos_embed(model, pretrain_model, new_size=model.img_size)
             else:
-                print(f"Removing key {k} from pretrained checkpoint: no matching shape", pretrain_model[k].shape, state_dict[k].shape)
+                print(
+                    f"Removing key {k} from pretrained checkpoint: no matching shape",
+                    pretrain_model[k].shape,
+                    state_dict[k].shape,
+                )
                 del pretrain_model[k]
-  
-#    for k in list( checkpoint_model.keys()):
-#        print("after deletion. Name ",k,flush=True)
 
     # load pre-trained model
     msg = model.load_state_dict(pretrain_model, strict=False)
@@ -150,128 +252,17 @@ def _load_pretrained_weights(model, pretrain_path, device,world_rank):
     del pretrain_model
 
 
-
 """
 Setup sequence, data, tensor model, and sequence_plus_data parallel groups
 """
-
-def init_par_groups(data_par_size, tensor_par_size, seq_par_size, fsdp_size, simple_ddp_size, num_heads):
-
-    world_size = torch.distributed.get_world_size()
-
-    assert seq_par_size ==1, "Sequence parallelism not implemented"
-
-    print(f"data_par_size: {data_par_size}")
-    print(f"seq_par_size: {seq_par_size}")  
-    print(f"tensor_par_size: {tensor_par_size}")
-    print(f"world_size: {world_size}")
-    print(f"Product: {data_par_size * seq_par_size * tensor_par_size}")
-    assert (data_par_size * seq_par_size * tensor_par_size)==world_size, "DATA_PAR_SIZE * SEQ_PAR_SIZE * TENSOR_PAR_SIZE must equal to world_size"
-    assert (num_heads % tensor_par_size) ==0, "model heads % tensor parallel size must be 0"
-
-
-
-    tensor_par_group = None
-
-    for i in range(data_par_size *seq_par_size):
-        ranks = [j for j in range(i*tensor_par_size,(i+1)*tensor_par_size)]
-
-        if world_rank==0:
-            print("i ",i," data_par_size ",data_par_size," SEQ_PAR_SIZE ",seq_par_size," TENSOR_PAR_SIZE ",tensor_par_size," tensor_par_group ranks ",ranks)
-
-        group = dist.new_group(ranks)
-
-        if world_rank in ranks:
-            tensor_par_group = group
-
-
-
-
-    seq_par_group = None
-
-    for t in range(data_par_size):
-        for i in range(tensor_par_size):
-            ranks = [t*tensor_par_size*seq_par_size+i+j*tensor_par_size for j in range(seq_par_size)]
-
-            if world_rank==0:
-                print("i ",i," data_par_size ",data_par_size," SEQ_PAR_SIZE ",seq_par_size, " TENSOR_PAR_SIZE ",tensor_par_size," seq_par_group ranks ",ranks,flush=True)
-
-            group = dist.new_group(ranks)
-
-            if world_rank in ranks:
-
-                seq_par_group = group
-
-
-
-
-    data_par_group = None
-
-    fsdp_group = None
-
-    simple_ddp_group = None
-
-    for i in range(tensor_par_size *seq_par_size):
-        ranks = [i+j*tensor_par_size *seq_par_size for j in range(data_par_size)]
-
-        for k in range(simple_ddp_size):
-            fsdp_begin_idx = k*fsdp_size
-            fsdp_end_idx = (k+1)*fsdp_size
-            fsdp_ranks = ranks[fsdp_begin_idx:fsdp_end_idx]
-
- 
-            if world_rank==0:
-                print("i ",i," data_par_size ",data_par_size," SEQ_PAR_SIZE ",seq_par_size," TENSOR_PAR_SIZE ",tensor_par_size," fsdp_ranks",fsdp_ranks)
-
-
-            group = dist.new_group(fsdp_ranks)
-            if world_rank in fsdp_ranks:
-                fsdp_group = group
-
-
-        for k in range(fsdp_size):
-            simple_ddp_begin_idx = k
-            simple_ddp_end_idx = len(ranks)
-            simple_ddp_ranks = ranks[simple_ddp_begin_idx:simple_ddp_end_idx:fsdp_size]
-
- 
-            if world_rank==0:
-                print("i ",i," data_par_size ",data_par_size," SEQ_PAR_SIZE ",seq_par_size," TENSOR_PAR_SIZE ",tensor_par_size," simple_ddp_ranks",simple_ddp_ranks)
-
-            group = dist.new_group(simple_ddp_ranks)
-            if world_rank in simple_ddp_ranks:
-                simple_ddp_group = group
- 
-        if world_rank==0:
-            print("i ",i," data_par_size ",data_par_size," SEQ_PAR_SIZE ",seq_par_size," TENSOR_PAR_SIZE ",tensor_par_size," data_par_group ranks ",ranks)
-        group = dist.new_group(ranks)
-        if world_rank in ranks:
-            data_par_group = group
-
-
-    data_seq_ort_group = None
-
-    for i in range(tensor_par_size):
-        ranks = [i+tensor_par_size*j for j in range(data_par_size * seq_par_size)]
-
-        if world_rank==0:
-            print("i ",i," data_par_size ",data_par_size," SEQ_PAR_SIZE ",seq_par_size," TENSOR_PAR_SIZE ",tensor_par_size," data_seq_ort_group ranks ",ranks)
-        group = dist.new_group(ranks)
-
-        if world_rank in ranks:
-            data_seq_ort_group = group
-
-    return seq_par_group, data_par_group, tensor_par_group, data_seq_ort_group, fsdp_group, simple_ddp_group
-
-
 
 
 def clip_replace_constant(y, yhat, out_variables):
 
     prcp_index = out_variables.index("total_precipitation_24hr")
     for i in range(yhat.shape[1]):
-        if i==prcp_index:
-            torch.clamp_(yhat[:,prcp_index,:,:], min=0.0)
+        if i == prcp_index:
+            torch.clamp_(yhat[:, prcp_index, :, :], min=0.0)
 
     for i in range(yhat.shape[1]):
         # if constant replace with ground-truth value
@@ -281,58 +272,52 @@ def clip_replace_constant(y, yhat, out_variables):
 
 
 def training_step(
-    batch,
-    batch_idx,
-    net,
-    device: int,
-    var_weights,
-    train_loss_metric) -> torch.Tensor:
+    batch, batch_idx, net, device: int, var_weights, train_loss_metric
+) -> torch.Tensor:
     x, y, in_variables, out_variables = batch
     x = x.to(device)
     y = y.to(device)
-    
-    yhat = net.forward(x,in_variables,out_variables)
+
+    yhat = net.forward(x, in_variables, out_variables)
     yhat = clip_replace_constant(y, yhat, out_variables)
 
-    if y.size(dim=2)!=yhat.size(dim=2) or y.size(dim=3)!=yhat.size(dim=3):
-        losses = train_loss_metric(yhat, y[:,:,0:yhat.size(dim=2),0:yhat.size(dim=3)], var_names = out_variables, var_weights=var_weights)
+    if y.size(dim=2) != yhat.size(dim=2) or y.size(dim=3) != yhat.size(dim=3):
+        losses = train_loss_metric(
+            yhat,
+            y[:, :, 0 : yhat.size(dim=2), 0 : yhat.size(dim=3)],
+            var_names=out_variables,
+            var_weights=var_weights,
+        )
     else:
 
-        losses = train_loss_metric(yhat, y, var_names = out_variables, var_weights=var_weights)
+        losses = train_loss_metric(
+            yhat, y, var_names=out_variables, var_weights=var_weights
+        )
     loss_name = getattr(train_loss_metric, "name", "loss")
     if losses.dim() == 0:  # aggregate loss only
         loss = losses
     else:  # per channel + aggregate
         loss = losses[-1]
-        
+
     return loss
 
 
-
 def validation_step(
-    batch,
-    batch_idx: int,
-    net,
-    device: int,
-    val_loss_metrics,
-    val_target_transforms) -> torch.Tensor:
+    batch, batch_idx: int, net, device: int, val_loss_metrics, val_target_transforms
+) -> torch.Tensor:
 
-    return evaluate_func(batch, "val",net,device,val_loss_metrics,val_target_transforms)
+    return evaluate_func(
+        batch, "val", net, device, val_loss_metrics, val_target_transforms
+    )
 
 
-def evaluate_func(
-    batch,
-    stage: str,
-    net,
-    device: int,
-    loss_metrics,
-    target_transforms):
+def evaluate_func(batch, stage: str, net, device: int, loss_metrics, target_transforms):
 
     x, y, in_variables, out_variables = batch
     x = x.to(device)
     y = y.to(device)
- 
-    yhat = net.forward(x, in_variables,out_variables)
+
+    yhat = net.forward(x, in_variables, out_variables)
     yhat = clip_replace_constant(y, yhat, out_variables)
 
     if stage == "val":
@@ -340,7 +325,7 @@ def evaluate_func(
         transforms = target_transforms
     elif stage == "test":
         loss_fns = loss_metrics
-        transforms = self.target_transforms
+        transforms = target_transforms
     else:
         raise RuntimeError("Invalid evaluation stage")
     loss_dict = {}
@@ -350,8 +335,8 @@ def evaluate_func(
             yhat_ = transforms[i](yhat)
             y_ = transforms[i](y)
 
-        if y_.size(dim=2)!=yhat_.size(dim=2) or y_.size(dim=3)!=yhat_.size(dim=3):
-            losses = lf(yhat_, y_[:,:,0:yhat_.size(dim=2),0:yhat_.size(dim=3)])
+        if y_.size(dim=2) != yhat_.size(dim=2) or y_.size(dim=3) != yhat_.size(dim=3):
+            losses = lf(yhat_, y_[:, :, 0 : yhat_.size(dim=2), 0 : yhat_.size(dim=3)])
         else:
             losses = lf(yhat_, y_)
 
@@ -366,123 +351,608 @@ def evaluate_func(
     return loss_dict
 
 
+def setup_environment(local_rank):
+    """
+    Set up the distributed training environment.
 
+    Args:
+        local_rank (int): Local rank of the current process
 
-def seed_everything(seed):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-
-
-def main(device, local_rank):
-
-    world_size = dist.get_world_size()
+    Returns:
+        tuple: (device, world_size, world_rank, local_rank)
+    """
+    # Get distributed training information from SLURM environment
+    world_size = int(os.environ["SLURM_NTASKS"])
     world_rank = dist.get_rank()
+    local_rank = int(os.environ["SLURM_LOCALID"])
+
+    # Set up device
+    device = torch.device(f"cuda:{local_rank}")
+    torch.cuda.set_device(device)
+
+    # Print process information
+    print(f"Rank {world_rank}/{world_size} using device {device}", flush=True)
+
+    return device, world_size, world_rank, local_rank
 
 
-    print("world_size",world_size,"world_rank",world_rank,"local_rank",local_rank,flush=True)
+def create_model_and_optimizer(
+    config, device, world_rank, data_module, in_vars, out_vars, train_loss_str
+):
+    """
+    Create model, optimizer, and scheduler.
+
+    Args:
+        config (dict): Full configuration dictionary
+        device: Training device
+        world_rank (int): Process rank
+        data_module: Data module for getting data dimensions
+        in_vars (list): Input variable names
+        out_vars (list): Output variable names
+        train_loss_str (str): Loss function name
+
+    Returns:
+        tuple: (model, optimizer, scheduler, train_loss, val_losses)
+    """
+    # Extract model configuration
+    preset = config["model"]["preset"]
+    model_kwargs = config["model"].copy()
+    model_kwargs.pop("preset", None)  # Remove preset from kwargs
+
+    # Set up model
+    (
+        model,
+        train_loss,
+        val_losses,
+        test_losses,
+        train_transform,
+        val_transforms,
+        test_transforms,
+    ) = cl.load_downscaling_module(
+        device,
+        model=None,
+        data_module=data_module,
+        architecture=preset,
+        train_loss=train_loss_str,
+        model_kwargs=model_kwargs,
+    )
+
+    if world_rank == 0:
+        print(f"Created model: {preset}", flush=True)
+        print(
+            f"Model parameters: {sum(p.numel() for p in model.parameters()) / 1e6:.2f}M",
+            flush=True,
+        )
+
+    # Extract optimizer configuration
+    lr = float(config["model"]["lr"])
+    weight_decay = float(config["model"]["weight_decay"])
+    beta_1 = float(config["model"]["beta_1"])
+    beta_2 = float(config["model"]["beta_2"])
+
+    # Create optimizer
+    optimizer = cl.load_optimizer(
+        model,
+        "adamw",
+        {"lr": lr, "weight_decay": weight_decay, "betas": (beta_1, beta_2)},
+    )
+
+    # Extract scheduler configuration
+    warmup_epochs = config["model"]["warmup_epochs"]
+    warmup_start_lr = float(config["model"]["warmup_start_lr"])
+    eta_min = float(config["model"]["eta_min"])
+    max_epochs = config["trainer"]["max_epochs"]
+
+    # Create scheduler
+    scheduler = cl.load_lr_scheduler(
+        "linear-warmup-cosine-annealing",
+        optimizer,
+        {
+            "warmup_epochs": warmup_epochs,
+            "max_epochs": max_epochs,
+            "warmup_start_lr": warmup_start_lr,
+            "eta_min": eta_min,
+        },
+    )
+
+    return model, optimizer, scheduler, train_loss, val_losses
+
+
+def create_data_module(data_key, config, world_rank, device, do_tiling, div, overlap):
+    """
+    Create data module and loaders for training.
+
+    Args:
+        data_key (str): Dataset identifier (e.g., 'ERA5_1', 'PRISM')
+        config (dict): Full configuration dictionary
+        world_rank (int): Process rank
+        device: Training device
+        do_tiling (bool): Whether to use TILES algorithm
+        div (int): Tile division factor
+        overlap (int): Tile overlap in pixels
+
+    Returns:
+        tuple: (data_module, train_dataloader, val_dataloader, lat, lon)
+    """
+    # Extract configuration
+    low_res_dir = config["data"]["low_res_dir"]
+    high_res_dir = config["data"]["high_res_dir"]
+    dict_in_variables = config["data"]["dict_in_variables"]
+    dict_out_variables = config["data"]["dict_out_variables"]
+    default_vars = config["data"]["default_vars"]
+
+    batch_size = config["trainer"]["batch_size"]
+    num_workers = config["trainer"]["num_workers"]
+    buffer_size = config["trainer"]["buffer_size"]
+
+    # Get variables for this dataset
+    in_vars = dict_in_variables.get(data_key, default_vars)
+    out_vars = dict_out_variables.get(data_key, ["2m_temperature"])
+
+    if world_rank == 0:
+        print(f"Creating data module for {data_key}", flush=True)
+        print(f"Input variables: {in_vars}", flush=True)
+        print(f"Output variables: {out_vars}", flush=True)
+        log_gpu_memory(device, f"before data_module {data_key}")
+
+    # Create data module
+    data_module = cl.data.IterDataModule(
+        "downscaling",
+        low_res_dir[data_key],
+        high_res_dir[data_key],
+        in_vars,
+        out_vars,
+        subsample=1,
+        buffer_size=buffer_size,
+    )
+
+    # Check tiling compatibility
+    if do_tiling:
+        patch_size = config["model"]["patch_size"]
+        lat, lon = data_module.get_lat_lon()
+        yout = len(lat) // div
+        yinp = yout // 4 + overlap
+
+        if yinp % patch_size != 0:
+            if world_rank == 0:
+                print(f"Tile height: {yinp}, patch_size {patch_size}", flush=True)
+                print(
+                    f"Overlap must be adjusted to accommodate patch_size. Need to increase by {yinp % patch_size}",
+                    flush=True,
+                )
+            sys.exit("Please adjust overlap according to the instructions above")
+
+    if world_rank == 0:
+        log_gpu_memory(device, f"after data_module {data_key}")
+
+    # Create data loaders
+    train_dataloader = data_module.train_dataloader(
+        batch_size,
+        num_workers,
+        shuffle=True,
+        prefetch_factor=2,
+        enable_tiling=do_tiling,
+        num_tile=div * div if do_tiling else 1,
+        tile_size=128,  # This seems to be hardcoded in original
+    )
+
+    val_dataloader = data_module.val_dataloader(
+        batch_size, num_workers, shuffle=False, prefetch_factor=2
+    )
+
+    return data_module, train_dataloader, val_dataloader
+
+
+def train_epoch(
+    model,
+    train_dataloader,
+    optimizer,
+    scheduler,
+    scaler,
+    epoch,
+    world_rank,
+    device,
+    var_weights,
+    train_loss,
+    data_type="float32",
+):
+    """
+    Train model for one epoch.
+
+    Args:
+        model: Model to train
+        train_dataloader: DataLoader for training data
+        optimizer: Optimizer
+        scheduler: Learning rate scheduler
+        scaler: GradScaler for mixed precision training
+        epoch (int): Current epoch number
+        world_rank (int): Process rank
+        device: Training device
+        var_weights: Variable weights for loss calculation
+        train_loss: Loss function
+        data_type (str): Data type for training ('float32', 'float16', 'bfloat16')
+
+    Returns:
+        float: Average epoch loss
+    """
+    model.train()
+    epoch_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+
+    if world_rank == 0:
+        print(f"Starting epoch {epoch}", flush=True)
+
+    for batch_idx, batch in enumerate(train_dataloader):
+        # Time measurement for rank 0
+        if world_rank == 0:
+            torch.cuda.synchronize(device=device)
+            tic1 = time.perf_counter()
+
+        # Forward pass
+        loss = training_step(batch, batch_idx, model, device, var_weights, train_loss)
+        epoch_loss += loss.detach()
+
+        # Backward pass
+        optimizer.zero_grad()
+
+        if data_type == "float16":
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
+
+        # Optimizer step
+        if data_type == "float16":
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            scaler.step(optimizer)
+            scaler.update()
+            # Ensure minimum scale
+            if hasattr(scaler, "_scale") and scaler._scale < 128:
+                scaler._scale = torch.tensor(128).to(scaler._scale)
+        else:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+            optimizer.step()
+
+        # Memory logging for debugging
+        if world_rank == 0 and batch_idx % 100 == 0:
+            log_gpu_memory(
+                device,
+                f"batch_idx {batch_idx} get_lr {scheduler.get_lr()} after optimizer step",
+                world_rank,
+            )
+
+        # Timing for rank 0
+        if world_rank == 0:
+            torch.cuda.synchronize(device=device)
+            tic4 = time.perf_counter()
+            if batch_idx % 10 == 0:
+                print(f"Batch {batch_idx}: {(tic4-tic1):0.4f} seconds", flush=True)
+
+    # Step scheduler
+    scheduler.step()
+
+    # Print epoch summary
+    if world_rank == 0:
+        print(f"Epoch {epoch} completed. Epoch loss: {epoch_loss.item()}", flush=True)
+
+    return epoch_loss.item()
+
+
+def save_checkpoint(
+    model,
+    optimizer,
+    scheduler,
+    epoch,
+    cp_save_path,
+    world_rank,
+    local_rank,
+    tensor_par_size,
+    device,
+):
+    """
+    Save model checkpoint to disk.
+
+    Args:
+        model: Model to save
+        optimizer: Optimizer state to save
+        scheduler: Learning rate scheduler state to save
+        epoch (int): Current epoch number
+        cp_save_path (str): Directory path for saving checkpoints
+        world_rank (int): Current process rank
+        local_rank (int): Local rank for the current process
+        tensor_par_size (int): Size of tensor parallelism
+        device: Current device
+    """
+    # Create checkpoint directory if needed (only on rank 0)
+    if world_rank == 0:
+        if not os.path.exists(cp_save_path):
+            os.makedirs(cp_save_path)
+            print(f"Created checkpoint directory: {cp_save_path}", flush=True)
+
+    # Log memory before saving
+    if world_rank == 0:
+        log_gpu_memory(device, "Before torch.save", world_rank)
+
+    # Get model, optimizer, and scheduler states
+    model_states = model.state_dict()
+    optimizer_states = optimizer.state_dict()
+    scheduler_states = scheduler.state_dict()
+
+    # Save checkpoint only for ranks that are part of tensor parallelism
+    if world_rank < tensor_par_size:
+        file_name = get_checkpoint_filename(
+            cp_save_path, epoch, world_rank, tensor_par_size
+        )
+
+        checkpoint_dict = {
+            "epoch": epoch,
+            "model_state_dict": model_states,
+            "optimizer_state_dict": optimizer_states,
+            "scheduler_state_dict": scheduler_states,
+        }
+
+        torch.save(checkpoint_dict, file_name)
+
+        if world_rank == 0:
+            print(f"Saved checkpoint to: {file_name}", flush=True)
+
+    # Log memory after saving
+    log_gpu_memory(device, "After torch.save", world_rank)
+
+    # Synchronize all processes
+    dist.barrier(device_ids=[local_rank])
+
+    # Clean up to free memory
+    del model_states
+    del optimizer_states
+    del scheduler_states
+
+
+def parse_config(config_path, world_rank):
+    """
+    Parse configuration from YAML file.
+
+    Args:
+        config_path (str): Path to configuration YAML file
+        world_rank (int): Current process rank for logging
+
+    Returns:
+        dict: Configuration dictionary with all parameters
+    """
+    if world_rank == 0:
+        print(f"Loading config from: {config_path}", flush=True)
+
+    # Load YAML configuration
+    with open(config_path, "r") as f:
+        conf = yaml.load(f, Loader=yaml.FullLoader)
+
+    # Extract trainer configuration
+    trainer_conf = {
+        "max_epochs": conf["trainer"]["max_epochs"],
+        "checkpoint_path": conf["trainer"]["checkpoint"],
+        "batch_size": conf["trainer"]["batch_size"],
+        "num_workers": conf["trainer"]["num_workers"],
+        "buffer_size": conf["trainer"]["buffer_size"],
+        "data_type": conf["trainer"]["data_type"],
+        "train_loss": conf["trainer"]["train_loss"],
+        "pretrain_path": conf["trainer"]["pretrain"],
+    }
+
+    # Extract parallelism configuration
+    parallelism_conf = {
+        "fsdp_size": conf["parallelism"]["fsdp"],
+        "simple_ddp_size": conf["parallelism"]["simple_ddp"],
+        "tensor_par_size": conf["parallelism"]["tensor_par"],
+        "seq_par_size": conf["parallelism"]["seq_par"],
+    }
+
+    # Extract tiling configuration with defaults
+    try:
+        do_tiling = conf["tiling"]["do_tiling"]
+        tiling_conf = {
+            "do_tiling": do_tiling,
+            "div": conf["tiling"]["div"] if do_tiling else 1,
+            "overlap": conf["tiling"]["overlap"] if do_tiling else 0,
+        }
+    except KeyError:
+        tiling_conf = {"do_tiling": False, "div": 1, "overlap": 0}
+
+    # Extract data configuration
+    data_conf = {
+        "low_res_dir": conf["data"]["low_res_dir"],
+        "high_res_dir": conf["data"]["high_res_dir"],
+        "default_vars": conf["data"]["default_vars"],
+        "dict_in_variables": conf["data"]["dict_in_variables"],
+        "dict_out_variables": conf["data"]["dict_out_variables"],
+        "var_weights": conf["data"].get("var_weights", {}),
+    }
+
+    # Extract model configuration
+    model_conf = conf["model"]
+
+    return {
+        "trainer": trainer_conf,
+        "parallelism": parallelism_conf,
+        "tiling": tiling_conf,
+        "data": data_conf,
+        "model": model_conf,
+    }
+
+
+def main(device):
+    """
+    Main training function for intermediate downscaling model.
+
+    This function coordinates the entire training pipeline:
+    1. Sets up distributed training environment
+    2. Loads configuration from YAML file
+    3. Initializes parallel process groups
+    4. Creates data loaders for multiple datasets
+    5. Builds and distributes the model across GPUs
+    6. Runs training loop with checkpointing
+
+    Args:
+        device: Initial device (will be overridden based on local rank)
+    """
+
+    world_size = int(os.environ["SLURM_NTASKS"])
+    world_rank = dist.get_rank()
+    local_rank = int(os.environ["SLURM_LOCALID"])
+
+    print(
+        "world_size",
+        world_size,
+        "world_rank",
+        world_rank,
+        "local_rank",
+        local_rank,
+        flush=True,
+    )
 
     config_path = sys.argv[1]
 
-    if world_rank==0:
-        print("config_path",config_path,flush=True)
+    if world_rank == 0:
+        print("config_path", config_path, flush=True)
 
-    conf = yaml.load(open(config_path,'r'),Loader=yaml.FullLoader)
+    conf = yaml.load(open(config_path, "r"), Loader=yaml.FullLoader)
 
-    max_epochs=conf['trainer']['max_epochs']
-    checkpoint_path = conf['trainer']['checkpoint']
-    batch_size = conf['trainer']['batch_size']
-    num_workers = conf['trainer']['num_workers']
-    buffer_size = conf['trainer']['buffer_size']
-    data_type = conf['trainer']['data_type']
-    gpu_type = conf['trainer']['gpu_type']
-    train_loss_str = conf['trainer']['train_loss'] 
-    pretrain_path = conf['trainer']['pretrain']
+    max_epochs = conf["trainer"]["max_epochs"]
+    checkpoint_path = conf["trainer"]["checkpoint"]
+    batch_size = conf["trainer"]["batch_size"]
+    num_workers = conf["trainer"]["num_workers"]
+    buffer_size = conf["trainer"]["buffer_size"]
+    data_type = conf["trainer"]["data_type"]
+    gpu_type = conf["trainer"]["gpu_type"]
+    train_loss_str = conf["trainer"]["train_loss"]
+    pretrain_path = conf["trainer"]["pretrain"]
 
-    fsdp_size = conf['parallelism']['fsdp'] 
-    simple_ddp_size = conf['parallelism']['simple_ddp']
-    tensor_par_size = conf['parallelism']['tensor_par']
-    seq_par_size = conf['parallelism']['seq_par']
+    fsdp_size = conf["parallelism"]["fsdp"]
+    simple_ddp_size = conf["parallelism"]["simple_ddp"]
+    tensor_par_size = conf["parallelism"]["tensor_par"]
+    seq_par_size = conf["parallelism"]["seq_par"]
 
     try:
-        do_tiling = conf['tiling']['do_tiling']
+        do_tiling = conf["tiling"]["do_tiling"]
         if do_tiling:
-            div = conf['tiling']['div']
-            overlap = conf['tiling']['overlap']
+            div = conf["tiling"]["div"]
+            overlap = conf["tiling"]["overlap"]
         else:
             div = 1
             overlap = 0
-    except:
+    except Exception:
         do_tiling = False
         div = 1
         overlap = 0
 
-    low_res_dir = conf['data']['low_res_dir']
-    high_res_dir = conf['data']['high_res_dir']
-    preset = conf['model']['preset']
-    var_weights = conf['data']['var_weights']
-    dict_out_variables = conf['data']['dict_out_variables']
-    dict_in_variables = conf['data']['dict_in_variables']
-    default_vars =  conf['data']['default_vars']
-    spatial_resolution = conf['data']['spatial_resolution']
+    low_res_dir = conf["data"]["low_res_dir"]
+    high_res_dir = conf["data"]["high_res_dir"]
+    preset = conf["model"]["preset"]
+    var_weights = conf["data"]["var_weights"]
+    dict_out_variables = conf["data"]["dict_out_variables"]
+    dict_in_variables = conf["data"]["dict_in_variables"]
+    default_vars = conf["data"]["default_vars"]
+    spatial_resolution = conf["data"]["spatial_resolution"]
 
-    lr = float(conf['model']['lr'])
-    beta_1 = float(conf['model']['beta_1'])
-    beta_2 = float(conf['model']['beta_2'])
-    weight_decay = float(conf['model']['weight_decay'])
-    warmup_epochs =  conf['model']['warmup_epochs']
-    warmup_start_lr =  float(conf['model']['warmup_start_lr'])
-    eta_min =  float(conf['model']['eta_min'])
+    lr = float(conf["model"]["lr"])
+    beta_1 = float(conf["model"]["beta_1"])
+    beta_2 = float(conf["model"]["beta_2"])
+    weight_decay = float(conf["model"]["weight_decay"])
+    warmup_epochs = conf["model"]["warmup_epochs"]
+    warmup_start_lr = float(conf["model"]["warmup_start_lr"])
+    eta_min = float(conf["model"]["eta_min"])
 
-    superres_mag = conf['model']['superres_mag']
-    cnn_ratio = conf['model']['cnn_ratio']
-    patch_size =  conf['model']['patch_size']
-    embed_dim = conf['model']['embed_dim']
-    depth = conf['model']['depth']
-    decoder_depth = conf['model']['decoder_depth']
-    num_heads = conf['model']['num_heads']
-    mlp_ratio = conf['model']['mlp_ratio']
-    drop_path = conf['model']['drop_path']
-    drop_rate = conf['model']['drop_rate']
-
+    superres_mag = conf["model"]["superres_mag"]
+    cnn_ratio = conf["model"]["cnn_ratio"]
+    patch_size = conf["model"]["patch_size"]
+    embed_dim = conf["model"]["embed_dim"]
+    depth = conf["model"]["depth"]
+    decoder_depth = conf["model"]["decoder_depth"]
+    num_heads = conf["model"]["num_heads"]
+    mlp_ratio = conf["model"]["mlp_ratio"]
+    drop_path = conf["model"]["drop_path"]
+    drop_rate = conf["model"]["drop_rate"]
 
     data_par_size = fsdp_size * simple_ddp_size
 
-    if world_rank==0:
-        print("max_epochs",max_epochs," ",checkpoint_path," ",pretrain_path," ",low_res_dir," ",high_res_dir,"spatial_resolution",spatial_resolution,"default_vars",default_vars,"preset",preset,"lr",lr,"beta_1",beta_1,"beta_2",beta_2,"weight_decay",weight_decay,"warmup_epochs",warmup_epochs,"warmup_start_lr",warmup_start_lr,"eta_min",eta_min,"superres_mag",superres_mag,"cnn_ratio",cnn_ratio,"patch_size",patch_size,"embed_dim",embed_dim,"depth",depth,"decoder_depth",decoder_depth,"num_heads",num_heads,"mlp_ratio",mlp_ratio,"drop_path",drop_path,"drop_rate",drop_rate,"batch_size",batch_size,"num_workers",num_workers,"buffer_size",buffer_size,"data_type",data_type,"gpu_type",gpu_type,"train_loss_str",train_loss_str,flush=True)
-        print("data_par_size",data_par_size,"fsdp_size",fsdp_size,"simple_ddp_size",simple_ddp_size,"tensor_par_size",tensor_par_size,"seq_par_size",seq_par_size,"division",div,"overlap",overlap,flush=True)
+    if world_rank == 0:
+        print("\n" + "=" * 80)
+        print("Training Configuration Summary")
+        print("=" * 80)
+        print(f"Model: {preset}, Parameters: {embed_dim}d {depth}L {num_heads}H")
+        print(f"Training: {max_epochs} epochs, batch_size={batch_size}, lr={lr}")
+        print(f"Data type: {data_type}, Loss: {train_loss_str}")
+        print(f"Checkpoint: {checkpoint_path if checkpoint_path else 'None'}")
+        print(f"Pretrain: {pretrain_path if pretrain_path else 'None'}")
+        print("=" * 80 + "\n", flush=True)
+        print(
+            "data_par_size",
+            data_par_size,
+            "fsdp_size",
+            fsdp_size,
+            "simple_ddp_size",
+            simple_ddp_size,
+            "tensor_par_size",
+            tensor_par_size,
+            "seq_par_size",
+            seq_par_size,
+            "division",
+            div,
+            "overlap",
+            overlap,
+            flush=True,
+        )
 
-    #initialize parallelism groups
-    seq_par_group, data_par_group, tensor_par_group, data_seq_ort_group, fsdp_group, simple_ddp_group = init_par_groups(data_par_size = data_par_size, tensor_par_size = tensor_par_size, seq_par_size = seq_par_size, fsdp_size = fsdp_size, simple_ddp_size = simple_ddp_size, num_heads= num_heads)
+    # initialize parallelism groups
+    (
+        seq_par_group,
+        data_par_group,
+        tensor_par_group,
+        data_seq_ort_group,
+        fsdp_group,
+        simple_ddp_group,
+    ) = init_par_groups(
+        data_par_size=data_par_size,
+        tensor_par_size=tensor_par_size,
+        seq_par_size=seq_par_size,
+        fsdp_size=fsdp_size,
+        simple_ddp_size=simple_ddp_size,
+        num_heads=num_heads,
+    )
 
-    if gpu_type == "amd"
+    if gpu_type == "amd":
         if data_type == "bfloat16":
             FusedAttn_option = FusedAttn.CK
         else:
-           FusedAttn_option = FusedAttn.DEFAULT
+            FusedAttn_option = FusedAttn.DEFAULT
     else:
         FusedAttn_option = FusedAttn.DEFAULT
 
-    model_kwargs = {'default_vars':default_vars,'superres_mag':superres_mag,'cnn_ratio':cnn_ratio,'patch_size':patch_size,'embed_dim':embed_dim,'depth':depth,'decoder_depth':decoder_depth,'num_heads':num_heads,'mlp_ratio':mlp_ratio,'drop_path':drop_path,'drop_rate':drop_rate, 'tensor_par_size':tensor_par_size, 'tensor_par_group':tensor_par_group,"FusedAttn_option":FusedAttn_option}
+    model_kwargs = {
+        "default_vars": default_vars,
+        "superres_mag": superres_mag,
+        "cnn_ratio": cnn_ratio,
+        "patch_size": patch_size,
+        "embed_dim": embed_dim,
+        "depth": depth,
+        "decoder_depth": decoder_depth,
+        "num_heads": num_heads,
+        "mlp_ratio": mlp_ratio,
+        "drop_path": drop_path,
+        "drop_rate": drop_rate,
+        "tensor_par_size": tensor_par_size,
+        "tensor_par_group": tensor_par_group,
+        "FusedAttn_option": FusedAttn_option,
+    }
 
+    if world_rank == 0:
+        print("model_kwargs", model_kwargs, flush=True)
 
-    if world_rank==0:
-        print("model_kwargs",model_kwargs,flush=True)
-
-
-    if preset!="vit" and preset!="res_slimvit":
-        print("Only supports vit or residual slim vit training.",flush=True)
+    if preset != "vit" and preset != "res_slimvit":
+        print("Only supports vit or residual slim vit training.", flush=True)
         sys.exit("Not vit or res_slimvit architecture")
 
-
-    #if both checkpoint and pretrain are available, use checkpoint
+    # if both checkpoint and pretrain are available, use checkpoint
     if checkpoint_path is not None and pretrain_path is not None:
         pretrain_path = None
-
 
     model = None
 
@@ -492,40 +962,39 @@ def main(device, local_rank):
 
     epoch_start = 0
 
-    cp_save_path = "checkpoints/climate" 
+    cp_save_path = "checkpoints/climate"
 
     if data_type == "bfloat16":
         scaler = ShardedGradScaler(init_scale=8192, growth_interval=100)
-        min_scale= 128
-        if world_rank==0:
-            print("initialize ShardedGradScaler for bfloat16",flush=True)
+        min_scale = 128
+        if world_rank == 0:
+            print("initialize ShardedGradScaler for bfloat16", flush=True)
 
-    while (epoch_start+interval_epochs) < max_epochs:
+    while (epoch_start + interval_epochs) < max_epochs:
 
         for data_key in low_res_dir.keys():
             # Set up data
-    
+
             in_vars = dict_in_variables[data_key]
             out_vars = dict_out_variables[data_key]
-    
-        
-            if world_rank==0:
-                print("***************************",flush=True)
-                print("data_key is ",data_key,flush=True)
-                print("in_vars",in_vars,flush=True)
-                print("out_vars",out_vars,flush=True)
-                print("default_vars",default_vars,flush=True)
-                print("before data_module torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(device)/1024/1024/1024),flush=True)
-    
-            #load data module
+
+            if world_rank == 0:
+                print("***************************", flush=True)
+                print("data_key is ", data_key, flush=True)
+                print("in_vars", in_vars, flush=True)
+                print("out_vars", out_vars, flush=True)
+                print("default_vars", default_vars, flush=True)
+                log_gpu_memory(device, "before data_module")
+
+            # load data module
             data_module = cl.data.IterDataModule(
                 "downscaling",
                 low_res_dir[data_key],
                 high_res_dir[data_key],
                 in_vars,
                 out_vars=out_vars,
-                data_par_size = data_par_size,
-                data_par_group = data_par_group,
+                data_par_size=data_par_size,
+                data_par_group=data_par_group,
                 subsample=1,
                 batch_size=batch_size,
                 buffer_size=buffer_size,
@@ -538,70 +1007,92 @@ def main(device, local_rank):
 
             if do_tiling:
                 lat, lon = data_module.get_lat_lon()
-                yout = len( lat ) // div
+                yout = len(lat) // div
                 yinp = yout // 4 + overlap
                 if yinp % patch_size != 0:
                     if world_rank == 0:
                         print(f"Tile height: {yinp}, patch_size {patch_size}")
-                        print("Overlap must be adjusted to accomodate patch_size of the Transformer. Need to increase the overlap by ", ( yinp % patch_size ))
-                        sys.exit("Please increase the overlap accordingly to the instructions in the print message")
-    
-            if world_rank==0:
-                print("after data_module torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(device)/1024/1024/1024),flush=True)
-    
+                        print(
+                            "Overlap must be adjusted to accommodate patch_size of the "
+                            "Transformer. Need to increase the overlap by ",
+                            (yinp % patch_size),
+                        )
+                        sys.exit(
+                            "Please increase the overlap accordingly to the instructions "
+                            "in the print message"
+                        )
+
+            if world_rank == 0:
+                log_gpu_memory(device, "after data_module")
+
             if first_time_bool:
                 # Set up deep learning model
-                model, train_loss,val_losses,test_losses,train_transform,val_transforms,test_transforms = cl.load_downscaling_module(device,model=model, data_module=data_module, architecture=preset,train_loss = train_loss_str, model_kwargs=model_kwargs)
-      
-                if dist.get_rank()==0:
-                    print("train_loss",train_loss,"train_transform",train_transform,"val_losses",val_losses,"val_transforms",val_transforms,flush=True)
-    
+                (
+                    model,
+                    train_loss,
+                    val_losses,
+                    test_losses,
+                    train_transform,
+                    val_transforms,
+                    test_transforms,
+                ) = cl.load_downscaling_module(
+                    device,
+                    model=model,
+                    data_module=data_module,
+                    architecture=preset,
+                    train_loss=train_loss_str,
+                    model_kwargs=model_kwargs,
+                )
+
+                # Model and loss functions created successfully
+
                 model = model.to(device)
-    
-    
-    
-    
-                if torch.distributed.get_rank()==0:
-                    print("before load_checkpoint_pretrain model is",flush=True)
-                    for name, param in model.named_parameters():
-                        print(name, param.data.shape)
-    
+
+                if torch.distributed.get_rank() == 0:
+                    print("Loading model weights...", flush=True)
+                    # Print only model summary instead of all parameters
+                    total_params = sum(p.numel() for p in model.parameters())
+                    print(
+                        f"Total model parameters: {total_params / 1e6:.2f}M", flush=True
+                    )
+
                 # load from checkpoint for continued training , or from pretrained model weights
-                load_checkpoint_pretrain(model, checkpoint_path, pretrain_path,cp_save_path,local_rank,tensor_par_size=tensor_par_size,tensor_par_group=tensor_par_group)
-    
-    
-    
-                if torch.distributed.get_rank()==0:
-                    print("after load_checkpoint_pretrain model is",flush=True)
-                    for name, param in model.named_parameters():
-                        print(name, param.data.shape)
-    
-    
+                load_checkpoint_pretrain(
+                    model,
+                    checkpoint_path,
+                    pretrain_path,
+                    cp_save_path,
+                    tensor_par_size=tensor_par_size,
+                    tensor_par_group=tensor_par_group,
+                )
+
+                # Model weights loaded, no need to print all parameters again
+
                 seed_everything(0)
-    
-    
-    
-                #set up layer wrapping
-                if preset =="vit" or preset=="res_slimvit":
-       
+
+                # set up layer wrapping
+                if preset == "vit" or preset == "res_slimvit":
+
                     auto_wrap_policy = functools.partial(
                         transformer_auto_wrap_policy,
                         transformer_layer_cls={
-                            Block, Sequential # < ---- Your Transformer layer class
+                            Block,
+                            Sequential,  # < ---- Your Transformer layer class
                         },
                     )
-    
-                    check_fn = lambda submodule: isinstance(submodule, Block)  or isinstance(submodule,Sequential)
-   
+
+                    check_fn = lambda submodule: isinstance(
+                        submodule, Block
+                    ) or isinstance(submodule, Sequential)
 
                 if data_type == "float32":
                     precision_dt = torch.float32
                 elif data_type == "bfloat16":
                     precision_dt = torch.bfloat16
                 else:
-                    raise RuntimeError("Data type not supported") 
+                    raise RuntimeError("Data type not supported")
 
-                #floating point policy
+                # floating point policy
                 bfloatPolicy = MixedPrecision(
                     param_dtype=precision_dt,
                     # Gradient communication precision.
@@ -610,129 +1101,164 @@ def main(device, local_rank):
                     buffer_dtype=precision_dt,
                 )
 
-                #hybrid sharded FSDP
-                if fsdp_size >1 and simple_ddp_size >1:
-            
-                    print("enter hybrid FSDP",flush=True)
-                    model = FSDP(model, device_id = local_rank, process_group= (fsdp_group,simple_ddp_group),sync_module_states=True, sharding_strategy=dist.fsdp.ShardingStrategy.HYBRID_SHARD,auto_wrap_policy = auto_wrap_policy, mixed_precision=bfloatPolicy, forward_prefetch=True, limit_all_gathers = False) 
-                #fully sharded FSDP
-                elif fsdp_size >1 and simple_ddp_size==1:
-                    print("enter fully sharded FSDP",flush=True)
-                    model = FSDP(model, device_id = local_rank, process_group= fsdp_group,sync_module_states=True, sharding_strategy=dist.fsdp.ShardingStrategy.FULL_SHARD,auto_wrap_policy = auto_wrap_policy, mixed_precision=bfloatPolicy, forward_prefetch=True, limit_all_gathers = False)
+                # hybrid sharded FSDP
+                if fsdp_size > 1 and simple_ddp_size > 1:
+
+                    print("enter hybrid FSDP", flush=True)
+                    model = FSDP(
+                        model,
+                        device_id=local_rank,
+                        process_group=(fsdp_group, simple_ddp_group),
+                        sync_module_states=True,
+                        sharding_strategy=dist.fsdp.ShardingStrategy.HYBRID_SHARD,
+                        auto_wrap_policy=auto_wrap_policy,
+                        mixed_precision=bfloatPolicy,
+                        forward_prefetch=True,
+                        limit_all_gathers=False,
+                    )
+                # fully sharded FSDP
+                elif fsdp_size > 1 and simple_ddp_size == 1:
+                    print("enter fully sharded FSDP", flush=True)
+                    model = FSDP(
+                        model,
+                        device_id=local_rank,
+                        process_group=fsdp_group,
+                        sync_module_states=True,
+                        sharding_strategy=dist.fsdp.ShardingStrategy.FULL_SHARD,
+                        auto_wrap_policy=auto_wrap_policy,
+                        mixed_precision=bfloatPolicy,
+                        forward_prefetch=True,
+                        limit_all_gathers=False,
+                    )
                 else:
-                #no shard only
-                    print("enter NO SHARD only,",flush=True)
-                    model = FSDP(model, device_id = local_rank, process_group= simple_ddp_group,sync_module_states=True, sharding_strategy=dist.fsdp.ShardingStrategy.NO_SHARD,auto_wrap_policy = auto_wrap_policy, mixed_precision=bfloatPolicy, forward_prefetch=True, limit_all_gathers = False)   
-    
-    
-    
-            #update spatial resolution, image size, and # variables to model based on datasets
+                    # no shard only
+                    print("enter NO SHARD only,", flush=True)
+                    model = FSDP(
+                        model,
+                        device_id=local_rank,
+                        process_group=simple_ddp_group,
+                        sync_module_states=True,
+                        sharding_strategy=dist.fsdp.ShardingStrategy.NO_SHARD,
+                        auto_wrap_policy=auto_wrap_policy,
+                        mixed_precision=bfloatPolicy,
+                        forward_prefetch=True,
+                        limit_all_gathers=False,
+                    )
+
+            # Update spatial resolution, image size, and number of variables to model
+            # based on datasets
             in_shape, _ = data_module.get_data_dims()
             _, in_height, in_width = in_shape[1:]
-   
-            with FSDP.summon_full_params(model):
-                model.data_config(spatial_resolution[data_key],(in_height, in_width),len(in_vars),len(out_vars))  
 
-    
+            with FSDP.summon_full_params(model):
+                model.data_config(
+                    spatial_resolution[data_key],
+                    (in_height, in_width),
+                    len(in_vars),
+                    len(out_vars),
+                )
+
             if first_time_bool:
-                #activation checkpointing
+                # activation checkpointing
                 apply_activation_checkpointing(
                     model, checkpoint_wrapper_fn=checkpoint_wrapper, check_fn=check_fn
                 )
-    
-                #load optimzier and scheduler
-    
-    
+
+                # load optimzier and scheduler
+
                 optimizer = cl.load_optimizer(
-	            model, "adamw", {"lr": lr, "weight_decay": weight_decay, "betas": (beta_1, beta_2)}
+                    model,
+                    "adamw",
+                    {"lr": lr, "weight_decay": weight_decay, "betas": (beta_1, beta_2)},
                 )
-    
+
                 scheduler = cl.load_lr_scheduler(
-	            "linear-warmup-cosine-annealing",
-	            optimizer,
-	            {
-	                "warmup_epochs": warmup_epochs,  
-	                "max_epochs": max_epochs,
-	                "warmup_start_lr": warmup_start_lr,
-	                "eta_min": eta_min,
-	            },
+                    "linear-warmup-cosine-annealing",
+                    optimizer,
+                    {
+                        "warmup_epochs": warmup_epochs,
+                        "max_epochs": max_epochs,
+                        "warmup_start_lr": warmup_start_lr,
+                        "eta_min": eta_min,
+                    },
                 )
-    
-    
-    
+
                 if checkpoint_path is not None:
-    
-                    print("optimizer resume from checkpoint",checkpoint_path," Checkpoint path found.",flush=True)
-                    src_rank = world_rank - tensor_par_size * dist.get_rank(group=data_seq_ort_group) 
-                    #map_location = 'cuda:'+str(device)
-                    map_location = 'cpu'
-                    if tensor_par_size>1:
-                        checkpoint_path = checkpoint_path+"_"+"rank"+"_"+str(src_rank)
- 
-                    checkpoint = torch.load(checkpoint_path,map_location=map_location)
-                    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-                    scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-                    epoch_start = checkpoint['epoch']+1
+
+                    print(
+                        "optimizer resume from checkpoint",
+                        checkpoint_path,
+                        " Checkpoint path found.",
+                        flush=True,
+                    )
+                    src_rank = world_rank - tensor_par_size * dist.get_rank(
+                        group=data_seq_ort_group
+                    )
+                    map_location = "cpu"
+                    checkpoint_path = get_tensor_parallel_checkpoint_path(
+                        checkpoint_path, src_rank, tensor_par_size
+                    )
+
+                    checkpoint = torch.load(checkpoint_path, map_location=map_location)
+                    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                    scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                    epoch_start = checkpoint["epoch"] + 1
                     del checkpoint
-    
-            #get latitude and longitude
+
+            # get latitude and longitude
             lat, lon = data_module.get_lat_lon()
-    
+
             # get train data loader
             train_dataloader = data_module.train_dataloader()
-    
+
             # get validation data loader
             val_dataloader = data_module.val_dataloader()
-    
-    
-    
-    
-            ## GPTL Timer
-            #dist.barrier()
-            #timer = ProfileTimer()
-    
-            #perform training
-    
-            epoch_end = epoch_start+interval_epochs
-            epoch_end = epoch_end if epoch_end<max_epochs else max_epochs      
-    
-            for epoch in range(epoch_start,epoch_end):
-        
-                #tell the model that we are in train mode. Matters because we have the dropout
+
+            # perform training
+
+            epoch_end = epoch_start + interval_epochs
+            epoch_end = epoch_end if epoch_end < max_epochs else max_epochs
+
+            for epoch in range(epoch_start, epoch_end):
+
+                # tell the model that we are in train mode. Matters because we have the dropout
                 model.train()
-                #timer.begin("epoch")
                 loss = 0.0
-                epoch_loss = torch.tensor(0.0 , dtype=torch.float32, device=device)
-                if world_rank==0:
-                    print("epoch ",epoch,flush=True)
-    
-                #timer.begin("dataload")
+                epoch_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+                if world_rank == 0:
+                    print("epoch ", epoch, flush=True)
+
                 for batch_idx, batch in enumerate(train_dataloader):
-                #timer.end("dataload")
-    
-                    if world_rank==0:
+
+                    if world_rank == 0:
                         torch.cuda.synchronize(device=device)
-                        tic1 = time.perf_counter() 
-    
-                    #timer.begin("training_step")
-                    ## torch.Size([64, 20, 32, 64]), torch.Size([64, 1, 128, 256])
-                    loss = training_step(batch, batch_idx,model,device,var_weights,train_loss)
-                    #timer.end("training_step")
-    
+                        tic1 = time.perf_counter()
+
+                    # torch.Size([64, 20, 32, 64]), torch.Size([64, 1, 128, 256])
+                    loss = training_step(
+                        batch, batch_idx, model, device, var_weights, train_loss
+                    )
+
                     epoch_loss += loss.detach()
-        
+
                     if world_rank < tensor_par_size:
-                        print("epoch: ",epoch,"batch_idx",batch_idx,"world_rank",world_rank," loss ",loss,flush=True)
-        
+                        print(
+                            "epoch: ",
+                            epoch,
+                            "batch_idx",
+                            batch_idx,
+                            "world_rank",
+                            world_rank,
+                            " loss ",
+                            loss,
+                            flush=True,
+                        )
+
                     optimizer.zero_grad()
-                    #timer.begin("backward")
 
                     if data_type == "float32":
                         loss.backward()
-                        #timer.end("backward")
-                        #timer.begin("optimizer_step")
                         optimizer.step()
-                        #timer.end("optimizer_step")
                     else:
                         # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
                         scaler.scale(loss).backward()
@@ -742,155 +1268,71 @@ def main(device, local_rank):
                         scaler.step(optimizer)
                         # Updates the scale for next iteration.
                         scaler.update()
-                        if scaler._scale <min_scale:
+                        if scaler._scale < min_scale:
                             scaler._scale = torch.tensor(min_scale).to(scaler._scale)
 
-   
-                    
-                    if world_rank==0:
-                        print("rank",world_rank,"batch_idx",batch_idx,"get_lr ",scheduler.get_lr(),"after optimizer step torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(device)/1024/1024/1024),flush=True)
-    
-    
-                    if world_rank==0:
-                        torch.cuda.synchronize(device=device)
-                        tic4 = time.perf_counter() 
-                        print(f"my rank {dist.get_rank()}. tic4-tic1 in {(tic4-tic1):0.4f} seconds\n",flush=True)
-    
-    
-                scheduler.step()
-                #timer.end("epoch")
-        
-                if world_rank==0:
-                    print("epoch: ",epoch," epoch_loss ",epoch_loss,flush=True)
-    
-   
-                if world_rank ==0:    
-                    # Check whether the specified checkpointing path exists or not
-                    isExist = os.path.exists(cp_save_path)
-                    if not isExist:
-                        # Create a new directory because it does not exist
-                        os.makedirs(cp_save_path)
-                        print("The new checkpoint save directory is created!")        
-        
-                if world_rank ==0:     
-                    print("rank",world_rank,"Before torch.save torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(device)/1024/1024/1024),flush=True)
-        
-        
-                model_states = model.state_dict()
-                optimizer_states = optimizer.state_dict()
-                scheduler_states = scheduler.state_dict()
-        
-                if world_rank < tensor_par_size:
+                    if world_rank == 0:
+                        log_gpu_memory(
+                            device,
+                            f"batch_idx {batch_idx} get_lr {scheduler.get_lr()} after optimizer step",
+                            world_rank,
+                        )
 
-                    if tensor_par_size >1:
-                        file_name = cp_save_path+"/"+"interm"+"_epoch_"+ str(epoch) +".ckpt"+"_"+"rank"+"_"+str(world_rank) 
-                    else:
-                        file_name = cp_save_path+"/"+"interm"+"_epoch_"+ str(epoch) +".ckpt"   
- 
-                    torch.save({
-                        'epoch': epoch,
-                        'model_state_dict': model_states,
-                        'optimizer_state_dict': optimizer_states,
-                        'scheduler_state_dict': scheduler_states,
-                        }, file_name)
-             
-                print("rank",world_rank,"After torch.save torch.cuda.memory_reserved: %fGB"%(torch.cuda.memory_reserved(device)/1024/1024/1024),flush=True)
-        
-                dist.barrier(device_ids= [local_rank])
-                del model_states
-                del optimizer_states
-                del scheduler_states
-    
-                #perform validation
-                if False:
-                    with torch.no_grad():
-                        #tell the model that we are in eval mode. Matters because we have the dropout
-                        model.eval()
-        
-                        if world_rank==0:
-                            print("val epoch ",epoch,flush=True)
-            
-                        for batch_idx, batch in enumerate(val_dataloader):
-        
-                            if world_rank==0:
-                                torch.cuda.synchronize(device=device)
-                                tic1 = time.perf_counter() 
-        
-                            losses = validation_step(batch, batch_idx,model,device,val_losses,val_transforms)
-            
-                            if world_rank==0:
-                                print("val epoch: ",epoch,"batch_idx",batch_idx,"world_rank",world_rank," losses ",losses,flush=True)
-                   
-                                torch.cuda.synchronize(device=device)
-                                tic4 = time.perf_counter() 
-                                print(f"my rank {dist.get_rank()}. tic4-tic1 in {(tic4-tic1):0.4f} seconds\n",flush=True)
-         
- 
-    
+                    if world_rank == 0:
+                        torch.cuda.synchronize(device=device)
+                        tic4 = time.perf_counter()
+                        print(
+                            f"my rank {dist.get_rank()}. tic4-tic1 in {(tic4-tic1):0.4f} seconds\n",
+                            flush=True,
+                        )
+
+                scheduler.step()
+
+                if world_rank == 0:
+                    print("epoch: ", epoch, " epoch_loss ", epoch_loss, flush=True)
+
+                # Save checkpoint at the end of epoch
+                save_checkpoint(
+                    model,
+                    optimizer,
+                    scheduler,
+                    epoch,
+                    cp_save_path,
+                    world_rank,
+                    local_rank,
+                    tensor_par_size,
+                    device,
+                )
+
             epoch_start = epoch_end
-    
+
             if first_time_bool:
                 first_time_bool = False
-    
-
 
 
 if __name__ == "__main__":
 
-    if len(sys.argv) > 2:
-        LAUNCHER = sys.argv[2]
-    else:
-        LAUNCHER = None
-    if LAUNCHER == "MPI":
-        from mpi4py import MPI
-        import socket
+    os.environ["MASTER_ADDR"] = str(os.environ["HOSTNAME"])
+    os.environ["MASTER_PORT"] = "29500"
+    os.environ["WORLD_SIZE"] = os.environ["SLURM_NTASKS"]
+    os.environ["RANK"] = os.environ["SLURM_PROCID"]
 
-        num_gpus_per_node = torch.cuda.device_count()
-        comm = MPI.COMM_WORLD
-        world_size = comm.Get_size()
-        world_rank = rank = comm.Get_rank()
-        local_rank = int(rank) % int(num_gpus_per_node) if num_gpus_per_node>0 else 0 # local_rank and device are 0 when using 1 GPU per task
-        os.environ['WORLD_SIZE'] = str(world_size)
-        os.environ['RANK'] = str(world_rank)
-        os.environ['LOCAL_RANK'] = str(local_rank)
+    world_size = int(os.environ["SLURM_NTASKS"])
+    world_rank = int(os.environ["SLURM_PROCID"])
+    local_rank = int(os.environ["SLURM_LOCALID"])
 
-        master_addr = None
-        if rank == 0:
-            hostname = socket.gethostname()
-            ip_address = socket.gethostbyname(hostname)
-            master_addr = ip_address
-        master_addr = comm.bcast(master_addr, root=0)
-        os.environ['MASTER_ADDR'] = master_addr
-        torch.cuda.set_device(local_rank)
-        device = torch.device(local_rank) if torch.cuda.is_available() else torch.device("cpu")
-    else:
-        os.environ['MASTER_ADDR'] = str(os.environ['HOSTNAME'])
-        os.environ['WORLD_SIZE'] = os.environ['SLURM_NTASKS']
-        os.environ['RANK'] = os.environ['SLURM_PROCID']
+    torch.cuda.set_device(local_rank)
+    device = torch.cuda.current_device()
 
-        world_size = int(os.environ['SLURM_NTASKS'])
-        world_rank = int(os.environ['SLURM_PROCID'])
-        local_rank = int(os.environ['SLURM_LOCALID'])
+    dist.init_process_group(
+        "nccl",
+        timeout=timedelta(seconds=7200000),
+        rank=world_rank,
+        world_size=world_size,
+    )
 
-        torch.cuda.set_device(local_rank)
-        device = torch.cuda.current_device()
+    print("Using dist.init_process_group. world_size ", world_size, flush=True)
 
-    os.environ['MASTER_PORT'] = "29500"
-
-    dist.init_process_group('nccl', timeout=timedelta(seconds=7200000), rank=world_rank, world_size=world_size)
-
-
-    print("Using dist.init_process_group. world_size ",world_size,flush=True)
-
-    ## GPTL timer init
-    #gp.initialize()
-
-    main(device, local_rank)
-
-    ## GPTL timer output
-    #output_dir = os.getenv("OUTPUT_DIR", "")
-    #gp.pr_file(os.path.join(output_dir, f"gp_timing.p{world_rank}"))
-    #gp.pr_summary_file(os.path.join(output_dir, "gp_timing.summary"))
-    #gp.finalize()
+    main(device)
 
     dist.destroy_process_group()

@@ -1,6 +1,12 @@
 # ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling
-<p align="center"> <img src="docs/figs/example_downscale.png" width="540px"> </p> 
-<p align="center"> <img src="docs/figs/example_downscale2.png" width="640px"> </p>
+
+<div align="center">
+  <img src="docs/figs/example_downscale.png" width="540px">
+</div>
+
+<div align="center">
+  <img src="docs/figs/example_downscale2.png" width="640px">
+</div>
 
 This repository contains code accompanying the paper [**ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling**](https://arxiv.org/pdf/2505.04802).
 
@@ -16,19 +22,18 @@ Conventional downscaling methods, such as dynamical approaches (nested climate m
 ## Reslim Architecture
 Reslim is a vision transformer (ViT) architecture that operates and trains directly on adaptively compressed spatial inputs, significantly reducing sequence length while preserving critical information. It preserves accuracy and reduces uncertainty through a lightweight residual learning architecture, enabling efficient, low-overhead predictions.
 
-
-<p align="center">
+<div align="center">
   <img src="docs/figs/reslim.png" width="640px">
-</p>
+</div>
 
 
 
 ## TILES Sequence Scaling Algorithm
-TILES is a ViT training algorithm that reduces ViT’s self-attention complexity from quadratic to linear. It works by dividing images into overlapping tiles, each processed in parallel on separate Graphical Process Units (GPUs) using localized self-attention. Each tile’s downscaled outputs are then seamlessly merged to the full image.
+TILES is a ViT training algorithm that reduces ViT's self-attention complexity from quadratic to linear. It works by dividing images into overlapping tiles, each processed in parallel on separate Graphical Process Units (GPUs) using localized self-attention. Each tile's downscaled outputs are then seamlessly merged to the full image.
 
-<p align="center">
+<div align="center">
   <img src="docs/figs/TILES.png" width="400px">
-</p>
+</div>
 
 
 ## Installation
@@ -58,7 +63,117 @@ pip install -e .
 
 
 ## Tutorial Example
-**To Do: Hong-Jun, fill in here for frontier supercomputer example.
+
+### Frontier
+#### Prerequisites
+- Access to Frontier supercomputer at ORNL
+- Allocated compute hours
+- Conda environment setup (see Installation section above)
+
+#### Step 1: Configure Your Experiment
+Choose an appropriate configuration file from `configs/`:
+- `interm_8m.yaml`: 8M parameter model for testing
+- `interm_117m.yaml`: 117M parameter model
+- `interm_1b.yaml`: 1B parameter model
+- `interm_10b.yaml`: 10B parameter model (requires more nodes)
+
+**Important:** Before running, review and modify the config file for your needs. See the [Hyperparameter Configuration](#hyperparameter-configuration) section below for detailed explanations of all parameters.
+
+Key settings for Frontier:
+
+**GPU Configuration:**
+```yaml
+trainer:
+  gpu_type: "amd"      # AMD GPUs on Frontier
+```
+
+**Parallelism Configuration:**
+```yaml
+parallelism:
+  fsdp: 4              # Fully Sharded Data Parallel
+  simple_ddp: 4        # Data Parallel
+  tensor_par: 1        # Tensor parallelism
+  seq_par: 1           # Sequence parallelism
+# Note: fsdp × simple_ddp × tensor_par_ranks should equal total number of GPUs
+```
+
+**TILES Configuration (for very large images):**
+```yaml
+tiling:
+  do_tiling: False     # Enable TILES for processing very large images/sequences
+  div: 4               # Division factor: splits image into div×div tiles
+                       # div=2 → 4 tiles (2×2), div=4 → 16 tiles (4×4)
+  overlap: 3           # Number of pixel rows/columns to overlap between adjacent tiles
+                       # Overlap ensures smooth reconstruction when stitching tiles
+                       # Important: Total tile size must be divisible by patch_size
+                       # If not, you'll get an error asking to adjust overlap
+```
+
+#### Step 2: Submit Training Job
+First, edit `launch_intermediate.sh` to update:
+- `#SBATCH -A` → your project allocation
+- `conda activate` path → your conda environment
+- `../configs/interm_8m.yaml` → your chosen config file (e.g., `interm_117m.yaml`, `interm_1b.yaml`)
+
+Then submit the job:
+```bash
+cd examples/
+sbatch launch_intermediate.sh
+```
+
+The script will:
+- Load required modules (ROCm 6.3.1, libfabric, aws-ofi-rccl)
+- Set up environment variables for optimal AMD GPU performance
+- Launch training with 8 GPUs per node
+- Output logs to `flash-{JOBID}.out`
+
+#### Step 3: Monitor Training
+```bash
+# Check job status
+squeue -u $USER
+
+# Monitor training progress
+tail -f flash-{JOBID}.out
+```
+
+Key log indicators:
+- Epoch progress and loss values
+- GPU memory usage per rank
+- Training throughput (samples/sec)
+- Checkpoint save confirmations
+
+#### Step 4: Visualize Results
+After training completes or reaches a checkpoint, edit `launch_visualize.sh` to update:
+- `#SBATCH -A` → your project allocation
+- `conda activate` path → your conda environment
+- `../configs/interm_8m_ft.yaml` → your config file
+
+For visualization, you have two options to specify the checkpoint:
+
+**Option 1: Using config file (default)**
+```yaml
+trainer:
+  pretrain: /path/to/your/checkpoint.ckpt  # Path to trained model checkpoint
+```
+
+**Option 2: Using command line argument (overrides config)**
+```bash
+# Edit launch_visualize.sh to add --checkpoint argument:
+python ./visualize.py ../configs/interm_8m_ft.yaml --checkpoint /path/to/custom/checkpoint.ckpt
+```
+
+Then submit the visualization job:
+```bash
+sbatch launch_visualize.sh
+```
+
+This will generate visualization outputs for:
+- Input low-resolution data
+- ORBIT-2 downscaled predictions at high resolution
+- Comparison metrics
+
+Additional visualization options:
+- `--checkpoint PATH`: Override checkpoint path from config file
 
 ### DGX
 1. Modify your [CONFIG_FILE] making sure that fsdp x simple_ddp x tensor_par_ranks = [NUM_GPUS]
@@ -114,8 +229,8 @@ Whether to perform tiling of the input data.
 - `div`: Int.
 Number of tiles to divide the x and y dimensions of the data into, e.g if data is (180,90) and div=2, each image is split into 2x2=4 (90,45) tiles.
 
-- `overlap`: Int. 
-**To Do: Hong-Jun, define overlap**
+- `overlap`: Int.
+Number of pixel rows/columns to overlap between adjacent tiles in the TILES algorithm. Overlap regions ensure smooth reconstruction when tiles are stitched back together. Note: Due to the 2:1 aspect ratio of climate data (longitude:latitude), the actual horizontal overlap is 2x the vertical overlap
 
 - `preset`: Str.
 **To Do: Xiao, define or take out**
@@ -201,9 +316,9 @@ See Table 1 of the orbit-2 paper at [ORBIT-2 Paper on arXiv](https://arxiv.org/p
 ## Performance
 ### Strong Scaling on Frontier
 
-<p align="center">
+<div align="center">
   <img src="docs/figs/strong_scaling.png" width="640px">
-</p>
+</div>
 
 ### Maximum Sequence Length Scaling
 
@@ -214,9 +329,10 @@ A key advantage of AI foundation models is their efficiency at inference. Once t
 
 ### Climate Analysis
 ORBIT-2 achieves high-fidelity precipitation downscaling (1998–2021) across 58 IPCC climate regions. Key metrics include R² correlation, SSIM, monsoon onset/withdrawal timing, precipitation seasonality, entropy, and Hovmöller diagnostics. The figure on the left shows ERA5 at 28 km resolution, exhibiting moderate skill scores across metrics and regions, whereas ORBIT-2 7 km downscaling (figure on the right) consistently achieves much higher skill scores across all metrics and monsoon regions. These results highlight the effectiveness of ORBIT-2 in enhancing the spatiotemporal fidelity of precipitation, especially in regions governed by complex climatic processes.
-<p align="center"
+
+<div align="center">
   <img src="docs/figs/climate_analysis.png" width="640px">
-</p>
+</div>
 
 
 

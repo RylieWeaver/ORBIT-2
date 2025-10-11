@@ -349,7 +349,7 @@ If you use ORBIT-2 in your research, please cite both the software and the paper
   author       = {Wang, Xiao and Choi, Jong-Youl and Lyngaas, Isaac and Yoon, Hong-Jun 
                   and Aji, Ashwin and Kurihana, Takuya and Fan, Ming and Balaprakash, Prasanna 
                   and Lu, Dan},
-  title        = {{ORBIT-2: Scaling Exascale Vision Transformer for Weather and Climate Downscaling}},
+  title        = {{ORBIT-2 Weather and Climate Downscaling Software Repository},
   url          = {https://github.com/XiaoWang-Github/ORBIT-2}
 }
 ```

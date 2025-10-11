@@ -338,4 +338,29 @@ ORBIT-2 achieves high-fidelity precipitation downscaling (1998–2021) across 58
 
 ### Animation
 ERA5 input at 28km and ORBIT-2 downscaled output at 7km for global precipitation.
-[ORBIT-2 animation](https://www.youtube.com/watch?v=Iahsl1L_1jQ) 
+[ORBIT-2 animation](https://www.youtube.com/watch?v=Iahsl1L_1jQ)
+
+
+### Citation
+If you use ORBIT-2 in your research, please cite both the software and the paper:
+Software citation:
+@software{Wang_ORBIT-2_Scaling_Exascale,
+  author       = {Wang, Xiao and Choi, Jong-Youl and Lyngaas, Isaac and Yoon, Hong-Jun 
+                  and Aji, Ashwin and Kurihana, Takuya and Fan, Ming and Balaprakash, Prasanna 
+                  and Lu, Dan},
+  title        = {{ORBIT-2: Scaling Exascale Vision Transformer for Weather and Climate Downscaling}},
+  url          = {https://github.com/XiaoWang-Github/ORBIT-2}
+}
+Paper citation:
+@misc{wang2025orbit2scalingexascalevision,
+  title         = {ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling}, 
+  author        = {Xiao Wang and Jong-Youl Choi and Takuya Kurihaya and Isaac Lyngaas and Hong-Jun Yoon 
+                   and Xi Xiao and David Pugmire and Ming Fan and Nasik M. Nafi and Aristeidis Tsaris 
+                   and Ashwin M. Aji and Maliha Hossain and Mohamed Wahib and Dali Wang and Peter Thornton 
+                   and Prasanna Balaprakash and Moetasim Ashfaq and Dan Lu},
+  year          = {2025},
+  eprint        = {2505.04802},
+  archivePrefix = {arXiv},
+  primaryClass  = {cs.LG},
+  url           = {https://arxiv.org/abs/2505.04802}
+} 

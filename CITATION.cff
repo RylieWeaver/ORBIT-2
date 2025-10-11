@@ -51,6 +51,5 @@ identifiers:
     description: ORBIT-2 Code Repository
 repository-code: 'https://github.com/XiaoWang-Github/ORBIT-2'
 abstract: >-
-  ORBIT-2: Scaling Exascale Vision Transformer for Weather
-  and Climate Downscaling
+  ORBIT-2 Weather and Climate Downscaling Foundation Model Software Repository
 

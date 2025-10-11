@@ -343,7 +343,6 @@ ERA5 input at 28km and ORBIT-2 downscaled output at 7km for global precipitation
 
 ### Citation
 If you use ORBIT-2 in your research, please cite both the software and the paper:
-Software citation:
 
 ```bibtex 
 @software{Wang_ORBIT-2_Scaling_Exascale,
@@ -355,7 +354,6 @@ Software citation:
 }
 ```
 
-Paper citation:
 ```bibtex
 @misc{wang2025orbit2scalingexascalevision,
   title         = {ORBIT-2: Scaling Exascale Vision Foundation Models for Weather and Climate Downscaling}, 

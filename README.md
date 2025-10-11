@@ -232,8 +232,6 @@ Number of tiles to divide the x and y dimensions of the data into, e.g if data i
 - `overlap`: Int.
 Number of pixel rows/columns to overlap between adjacent tiles in the TILES algorithm. Overlap regions ensure smooth reconstruction when tiles are stitched back together. Note: Due to the 2:1 aspect ratio of climate data (longitude:latitude), the actual horizontal overlap is 2x the vertical overlap
 
-- `preset`: Str.
-**To Do: Xiao, define or take out**
 
 - `lr`: Float.
 Initial learning rate for the optimizer.
@@ -302,13 +300,10 @@ Variables corresponding to the different channels used as input data for the mod
 - `dict_out_variables`: Dictionary of Lists of Str.
 Variables corresponding to the different channels in the output dataset that will be used as targets from the high resolution dataset for model prediction.
 
-- `var_weights`: Dictionary of Float
-**To Do: Xiao, more detailed description**
 
 
 ## Pretrained and Fine-Tuned Model Checkpoints
-**To Do: Jong-Youl, can you upload the checkpoints and include the path here.**
-
+Training dataset and its usage description can be found at [Constellation Data Storage Archive](https://doi.ccs.ornl.gov/dataset/e4c2db1f-e88c-5ad0-bb96-59be0ef7c772).
 
 ## Pretraining and Fine-Tuning Datasets on Frontier
 See Table 1 of the orbit-2 paper at [ORBIT-2 Paper on arXiv](https://arxiv.org/pdf/2505.04802) , for datasets trained for checkpoints

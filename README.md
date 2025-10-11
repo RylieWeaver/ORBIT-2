@@ -302,7 +302,7 @@ Variables corresponding to the different channels in the output dataset that wil
 
 
 
-## Pretrained and Fine-Tuned Model Checkpoints
+## Datsets and Model Checkpoints
 Training dataset and its usage description can be found at [Constellation Data Storage Archive](https://doi.ccs.ornl.gov/dataset/e4c2db1f-e88c-5ad0-bb96-59be0ef7c772).
 
 ## Pretraining and Fine-Tuning Datasets on Frontier

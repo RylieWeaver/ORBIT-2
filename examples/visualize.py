@@ -45,6 +45,25 @@ from climate_learn.utils.fused_attn import FusedAttn
 from utils import seed_everything, init_par_groups
 
 
+def validate_data_type(data_type):
+    """Validate that data_type is either bfloat16 or float32.
+    
+    Args:
+        data_type (str): Data type string from configuration
+        
+    Raises:
+        ValueError: If data_type is not 'bfloat16' or 'float32'
+    """
+    valid_types = ["bfloat16", "float32"]
+    if data_type not in valid_types:
+        raise ValueError(
+            f"Invalid data_type '{data_type}'. "
+            f"Only {valid_types} are supported. "
+            f"float16 is no longer supported due to numerical stability issues. "
+            f"Please use 'bfloat16' for 16-bit training or 'float32' for full precision."
+        )
+
+
 def load_pretrained_weights(
     model, pretrain_path, device, tensor_par_size=1, tensor_par_group=None
 ):
@@ -246,6 +265,10 @@ def main():
     # Use command line override if provided, otherwise use config value
     # Force float32 for visualization to avoid numpy conversion issues with bfloat16
     data_type = args.data_type or "float32"
+    
+    # Validate data type
+    validate_data_type(data_type)
+    
     if world_rank == 0 and conf["trainer"].get("data_type") == "bfloat16":
         print("Note: Forcing float32 for visualization (bfloat16 not supported for numpy conversion)", flush=True)
 

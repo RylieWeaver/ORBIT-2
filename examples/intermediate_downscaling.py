@@ -40,6 +40,25 @@ from climate_learn.dist.profile import *
 from utils import seed_everything, init_par_groups
 
 
+def validate_data_type(data_type):
+    """Validate that data_type is either bfloat16 or float32.
+    
+    Args:
+        data_type (str): Data type string from configuration
+        
+    Raises:
+        ValueError: If data_type is not 'bfloat16' or 'float32'
+    """
+    valid_types = ["bfloat16", "float32"]
+    if data_type not in valid_types:
+        raise ValueError(
+            f"Invalid data_type '{data_type}'. "
+            f"Only {valid_types} are supported. "
+            f"float16 is no longer supported due to numerical stability issues. "
+            f"Please use 'bfloat16' for 16-bit training or 'float32' for full precision."
+        )
+
+
 def log_gpu_memory(device, message="", world_rank=None):
     """Log GPU memory usage with optional message and rank."""
     memory_gb = torch.cuda.memory_reserved(device) / 1024 / 1024 / 1024
@@ -543,98 +562,117 @@ def create_data_module(data_key, config, world_rank, device, do_tiling, div, ove
     return data_module, train_dataloader, val_dataloader
 
 
-def train_epoch(
+def run_training_epochs(
     model,
-    train_dataloader,
     optimizer,
     scheduler,
     scaler,
-    epoch,
-    world_rank,
-    device,
+    train_dataloader,
+    epoch_start,
+    epoch_end,
+    data_type,
     var_weights,
     train_loss,
-    data_type="float32",
+    device,
+    world_rank,
+    tensor_par_size,
+    min_scale,
+    cp_save_path,
+    local_rank,
 ):
-    """
-    Train model for one epoch.
-
+    """Run training loop for specified epoch range.
+    
     Args:
         model: Model to train
-        train_dataloader: DataLoader for training data
-        optimizer: Optimizer
+        optimizer: Optimizer instance
         scheduler: Learning rate scheduler
-        scaler: GradScaler for mixed precision training
-        epoch (int): Current epoch number
-        world_rank (int): Process rank
-        device: Training device
+        scaler: GradScaler for mixed precision (used only with bfloat16)
+        train_dataloader: DataLoader for training data
+        epoch_start (int): Starting epoch number
+        epoch_end (int): Ending epoch number (exclusive)
+        data_type (str): Data type for training ('float32' or 'bfloat16')
         var_weights: Variable weights for loss calculation
         train_loss: Loss function
-        data_type (str): Data type for training ('float32', 'float16', 'bfloat16')
-
+        device: Training device
+        world_rank (int): Global rank of current process
+        tensor_par_size (int): Tensor parallel size
+        min_scale (float): Minimum scale value for GradScaler
+        cp_save_path (str): Path for saving checkpoints
+        local_rank (int): Local rank for current process
+        
     Returns:
-        float: Average epoch loss
+        int: Final epoch number
     """
-    model.train()
-    epoch_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-
-    if world_rank == 0:
-        print(f"Starting epoch {epoch}", flush=True)
-
-    for batch_idx, batch in enumerate(train_dataloader):
-        # Time measurement for rank 0
+    for epoch in range(epoch_start, epoch_end):
+        model.train()
+        epoch_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
+        
         if world_rank == 0:
-            torch.cuda.synchronize(device=device)
-            tic1 = time.perf_counter()
+            print(f"Starting epoch {epoch}", flush=True)
 
-        # Forward pass
-        loss = training_step(batch, batch_idx, model, device, var_weights, train_loss)
-        epoch_loss += loss.detach()
+        for batch_idx, batch in enumerate(train_dataloader):
+            if world_rank == 0:
+                torch.cuda.synchronize(device=device)
+                tic1 = time.perf_counter()
 
-        # Backward pass
-        optimizer.zero_grad()
-
-        if data_type == "float16":
-            scaler.scale(loss).backward()
-        else:
-            loss.backward()
-
-        # Optimizer step
-        if data_type == "float16":
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-            scaler.step(optimizer)
-            scaler.update()
-            # Ensure minimum scale
-            if hasattr(scaler, "_scale") and scaler._scale < 128:
-                scaler._scale = torch.tensor(128).to(scaler._scale)
-        else:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-            optimizer.step()
-
-        # Memory logging for debugging
-        if world_rank == 0 and batch_idx % 100 == 0:
-            log_gpu_memory(
-                device,
-                f"batch_idx {batch_idx} get_lr {scheduler.get_lr()} after optimizer step",
-                world_rank,
+            loss = training_step(
+                batch, batch_idx, model, device, var_weights, train_loss
             )
+            epoch_loss += loss.detach()
 
-        # Timing for rank 0
+            if world_rank < tensor_par_size:
+                print(
+                    f"epoch: {epoch}, batch_idx: {batch_idx}, "
+                    f"world_rank: {world_rank}, loss: {loss}",
+                    flush=True,
+                )
+
+            optimizer.zero_grad()
+
+            if data_type == "float32":
+                loss.backward()
+                optimizer.step()
+            else:
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                if scaler._scale < min_scale:
+                    scaler._scale = torch.tensor(min_scale).to(scaler._scale)
+
+            if world_rank == 0:
+                log_gpu_memory(
+                    device,
+                    f"batch_idx {batch_idx} get_lr {scheduler.get_lr()} after optimizer step",
+                    world_rank,
+                )
+
+            if world_rank == 0:
+                torch.cuda.synchronize(device=device)
+                tic4 = time.perf_counter()
+                if batch_idx % 10 == 0:
+                    print(
+                        f"Batch {batch_idx}: {(tic4-tic1):0.4f} seconds",
+                        flush=True,
+                    )
+
+        scheduler.step()
+
         if world_rank == 0:
-            torch.cuda.synchronize(device=device)
-            tic4 = time.perf_counter()
-            if batch_idx % 10 == 0:
-                print(f"Batch {batch_idx}: {(tic4-tic1):0.4f} seconds", flush=True)
+            print(f"Epoch {epoch} completed. Loss: {epoch_loss.item()}", flush=True)
 
-    # Step scheduler
-    scheduler.step()
+        save_checkpoint(
+            model,
+            optimizer,
+            scheduler,
+            epoch,
+            cp_save_path,
+            world_rank,
+            local_rank,
+            tensor_par_size,
+            device,
+        )
 
-    # Print epoch summary
-    if world_rank == 0:
-        print(f"Epoch {epoch} completed. Epoch loss: {epoch_loss.item()}", flush=True)
-
-    return epoch_loss.item()
+    return epoch_end
 
 
 def save_checkpoint(
@@ -824,6 +862,9 @@ def main(device):
     gpu_type = conf["trainer"]["gpu_type"]
     train_loss_str = conf["trainer"]["train_loss"]
     pretrain_path = conf["trainer"]["pretrain"]
+
+    # Validate data type early to fail fast with clear error message
+    validate_data_type(data_type)
 
     fsdp_size = conf["parallelism"]["fsdp"]
     simple_ddp_size = conf["parallelism"]["simple_ddp"]
@@ -1219,92 +1260,24 @@ def main(device):
             epoch_end = epoch_start + interval_epochs
             epoch_end = epoch_end if epoch_end < max_epochs else max_epochs
 
-            for epoch in range(epoch_start, epoch_end):
-
-                # tell the model that we are in train mode. Matters because we have the dropout
-                model.train()
-                loss = 0.0
-                epoch_loss = torch.tensor(0.0, dtype=torch.float32, device=device)
-                if world_rank == 0:
-                    print("epoch ", epoch, flush=True)
-
-                for batch_idx, batch in enumerate(train_dataloader):
-
-                    if world_rank == 0:
-                        torch.cuda.synchronize(device=device)
-                        tic1 = time.perf_counter()
-
-                    # torch.Size([64, 20, 32, 64]), torch.Size([64, 1, 128, 256])
-                    loss = training_step(
-                        batch, batch_idx, model, device, var_weights, train_loss
-                    )
-
-                    epoch_loss += loss.detach()
-
-                    if world_rank < tensor_par_size:
-                        print(
-                            "epoch: ",
-                            epoch,
-                            "batch_idx",
-                            batch_idx,
-                            "world_rank",
-                            world_rank,
-                            " loss ",
-                            loss,
-                            flush=True,
-                        )
-
-                    optimizer.zero_grad()
-
-                    if data_type == "float32":
-                        loss.backward()
-                        optimizer.step()
-                    else:
-                        # Scales loss.  Calls backward() on scaled loss to create scaled gradients.
-                        scaler.scale(loss).backward()
-                        # scaler.step() first unscales gradients of the optimizer's params.
-                        # If gradients don't contain infs/NaNs, optimizer.step() is then called,
-                        # otherwise, optimizer.step() is skipped.
-                        scaler.step(optimizer)
-                        # Updates the scale for next iteration.
-                        scaler.update()
-                        if scaler._scale < min_scale:
-                            scaler._scale = torch.tensor(min_scale).to(scaler._scale)
-
-                    if world_rank == 0:
-                        log_gpu_memory(
-                            device,
-                            f"batch_idx {batch_idx} get_lr {scheduler.get_lr()} after optimizer step",
-                            world_rank,
-                        )
-
-                    if world_rank == 0:
-                        torch.cuda.synchronize(device=device)
-                        tic4 = time.perf_counter()
-                        print(
-                            f"my rank {dist.get_rank()}. tic4-tic1 in {(tic4-tic1):0.4f} seconds\n",
-                            flush=True,
-                        )
-
-                scheduler.step()
-
-                if world_rank == 0:
-                    print("epoch: ", epoch, " epoch_loss ", epoch_loss, flush=True)
-
-                # Save checkpoint at the end of epoch
-                save_checkpoint(
-                    model,
-                    optimizer,
-                    scheduler,
-                    epoch,
-                    cp_save_path,
-                    world_rank,
-                    local_rank,
-                    tensor_par_size,
-                    device,
-                )
-
-            epoch_start = epoch_end
+            epoch_start = run_training_epochs(
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                train_dataloader=train_dataloader,
+                epoch_start=epoch_start,
+                epoch_end=epoch_end,
+                data_type=data_type,
+                var_weights=var_weights,
+                train_loss=train_loss,
+                device=device,
+                world_rank=world_rank,
+                tensor_par_size=tensor_par_size,
+                min_scale=min_scale,
+                cp_save_path=cp_save_path,
+                local_rank=local_rank,
+            )
 
             if first_time_bool:
                 first_time_bool = False

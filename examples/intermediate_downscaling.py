@@ -586,7 +586,7 @@ def run_training_epochs(
         model: Model to train
         optimizer: Optimizer instance
         scheduler: Learning rate scheduler
-        scaler: GradScaler for mixed precision (used only with bfloat16)
+        scaler: GradScaler for mixed precision (None for float32, required for bfloat16)
         train_dataloader: DataLoader for training data
         epoch_start (int): Starting epoch number
         epoch_end (int): Ending epoch number (exclusive)
@@ -596,7 +596,7 @@ def run_training_epochs(
         device: Training device
         world_rank (int): Global rank of current process
         tensor_par_size (int): Tensor parallel size
-        min_scale (float): Minimum scale value for GradScaler
+        min_scale (float): Minimum scale value for GradScaler (None for float32)
         cp_save_path (str): Path for saving checkpoints
         local_rank (int): Local rank for current process
         
@@ -1010,6 +1010,9 @@ def main(device):
         min_scale = 128
         if world_rank == 0:
             print("initialize ShardedGradScaler for bfloat16", flush=True)
+    else:
+        scaler = None
+        min_scale = None
 
     while (epoch_start + interval_epochs) < max_epochs:
 

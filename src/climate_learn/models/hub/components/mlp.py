@@ -111,9 +111,6 @@ class GluMlp(nn.Module):
         super().__init__()
         out_features = out_features or in_features
         hidden_features = hidden_features or in_features
-        self.in_features = in_features
-        self.hidden_features = hidden_features
-        self.out_features = out_features
         assert hidden_features % 2 == 0
         bias = to_2tuple(bias)
         drop_probs = to_2tuple(drop)
@@ -127,7 +124,6 @@ class GluMlp(nn.Module):
         self.norm = norm_layer(hidden_features // 2) if norm_layer is not None else nn.Identity()
         self.fc2 = linear_layer(hidden_features // 2, out_features, bias=bias[1])
         self.drop2 = nn.Dropout(drop_probs[1])
-        self.init_weights()
 
     def init_weights(self):
         # override init of fc1 w/ gate portion set to weight near zero, bias=1
